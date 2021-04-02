@@ -39,7 +39,7 @@ config_option(
     VM_PCI_SUPPORT
     "Enable virtual pci device support"
     DEPENDS
-    "KernelPlatformExynos5410 OR KernelPlatformExynos5422 OR KernelPlatformTx2 OR KernelPlatformQEMUArmVirt OR KernelPlatformOdroidc2 OR KernelPlatformZynqmp"
+    "KernelPlatformExynos5410 OR KernelPlatformExynos5422 OR KernelPlatformTx2 OR KernelPlatformQEMUArmVirt OR KernelPlatformOdroidc2 OR KernelPlatformZynqmp OR KernelPlatformRpi4"
     DEFAULT
     OFF
 )
@@ -49,7 +49,7 @@ config_option(
     VM_VIRTIO_NET_ARPING
     "Enable virtio net arping module"
     DEPENDS
-    "KernelPlatformExynos5410 OR KernelPlatformExynos5422 OR KernelPlatformTx2 OR KernelPlatformQEMUArmVirt OR KernelPlatformZynqmp;VmPCISupport"
+    "KernelPlatformExynos5410 OR KernelPlatformExynos5422 OR KernelPlatformTx2 OR KernelPlatformQEMUArmVirt OR KernelPlatformZynqmp OR KernelPlatformRpi4;VmPCISupport"
     DEFAULT
     OFF
 )
@@ -59,7 +59,7 @@ config_option(
     VM_VIRTIO_NET_VIRTQUEUE
     "Enable virtio net virtqueue forwarding module"
     DEPENDS
-    "KernelPlatformExynos5410 OR KernelPlatformExynos5422 OR KernelPlatformTx2 OR KernelPlatformQEMUArmVirt OR KernelPlatformZynqmp;VmPCISupport"
+    "KernelPlatformExynos5410 OR KernelPlatformExynos5422 OR KernelPlatformTx2 OR KernelPlatformQEMUArmVirt OR KernelPlatformZynqmp OR KernelPlatformRpi4;VmPCISupport"
     DEFAULT
     OFF
 )
@@ -69,7 +69,7 @@ config_option(
     VM_VIRTIO_CON
     "Enable virtio console module"
     DEPENDS
-    "KernelPlatformExynos5410 OR KernelPlatformExynos5422 OR KernelPlatformQEMUArmVirt;VmPCISupport"
+    "KernelPlatformExynos5410 OR KernelPlatformExynos5422 OR KernelPlatformQEMUArmVirt OR KernelPlatformRpi4;VmPCISupport"
     DEFAULT
     OFF
 )
