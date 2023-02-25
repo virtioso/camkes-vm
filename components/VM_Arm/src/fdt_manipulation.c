@@ -15,7 +15,10 @@ int fdt_generate_memory_node(void *fdt, uintptr_t base, size_t size)
     int address_cells = fdt_address_cells(fdt, root_offset);
     int size_cells = fdt_size_cells(fdt, root_offset);
 
-    int this = fdt_add_subnode(fdt, root_offset, "memory");
+    char name[64];
+    sprintf(name, "memory@%"PRIxPTR, base);
+
+    int this = fdt_add_subnode(fdt, root_offset, name);
     if (this < 0) {
         return this;
     }
