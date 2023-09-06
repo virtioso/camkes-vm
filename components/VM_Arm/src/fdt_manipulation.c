@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <camkes.h>
+
 #include <libfdt.h>
 #include <utils/util.h>
 
@@ -49,6 +51,11 @@ int fdt_generate_chosen_node(void *fdt, const char *stdout_path, const char *boo
             return err;
         }
     }
+
+    /* TODO: fix this hack */
+    char virtio_tmp[1024];
+    strcpy(virtio_tmp, bootargs);
+    bootargs = append_vm_virtio_device_cmdline(virtio_tmp);
 
     size_t bootargs_len = strlen(bootargs);
     /*  +3*sizeof(int) is a cheap approximated formula for maximum number of characters in a UINT_MAX
