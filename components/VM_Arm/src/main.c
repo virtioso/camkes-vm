@@ -696,6 +696,13 @@ static int install_vm_devices(vm_t *vm, const vm_config_t *vm_config)
             ZF_LOGE("Failed to install VPCI device");
             return -1;
         }
+        if (vm_config->generate_dtb) {
+            err = fdt_generate_vpci_node_start(vm, gen_dtb_buf);
+            if (err) {
+                ZF_LOGE("fdt_generate_vpci_node_start() failed (%d)", err);
+                return -1;
+            }
+        }
     }
 
     int max_vmm_modules = (int)(__stop__vmm_module - __start__vmm_module);
@@ -876,7 +883,7 @@ static int vm_dtb_finalize(vm_t *vm, const vm_config_t *vm_config)
 
     if (config_set(CONFIG_VM_PCI_SUPPORT)) {
         /* Modules can add PCI devices, so the PCI device tree node can be
-         * created only after all modules have been set up.
+         * finished only after all modules have been set up.
          */
         int gic_offset = fdt_path_offset(fdt_ori, GIC_NODE_PATH);
         if (gic_offset < 0) {
@@ -888,9 +895,9 @@ static int vm_dtb_finalize(vm_t *vm, const vm_config_t *vm_config)
             ZF_LOGE("Failed to find phandle in gic node");
             return -1;
         }
-        int err = fdt_generate_vpci_node(vm, pci, gen_dtb_buf, gic_phandle);
+        int err = fdt_generate_vpci_node_finish(vm, pci, gen_dtb_buf, gic_phandle);
         if (err) {
-            ZF_LOGE("Couldn't generate vpci_node (%d)", err);
+            ZF_LOGE("Couldn't generate vPCI interrupt map (%d)", err);
             return -1;
         }
     }
