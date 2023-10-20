@@ -38,6 +38,8 @@ int fdt_generate_memory_node(void *fdt, uintptr_t base, size_t size)
     return 0;
 }
 
+const char *WEAK append_vm_virtio_device_cmdline(char *buffer);
+
 int fdt_generate_chosen_node(void *fdt, const char *stdout_path, const char *bootargs, const unsigned int maxcpus)
 {
     int root_offset = fdt_path_offset(fdt, "/");
@@ -56,9 +58,11 @@ int fdt_generate_chosen_node(void *fdt, const char *stdout_path, const char *boo
     }
 
     /* TODO: fix this hack */
-    char virtio_tmp[1024];
-    strcpy(virtio_tmp, bootargs);
-    bootargs = append_vm_virtio_device_cmdline(virtio_tmp);
+    if (append_vm_virtio_device_cmdline) {
+        char virtio_tmp[1024];
+        strcpy(virtio_tmp, bootargs);
+        bootargs = append_vm_virtio_device_cmdline(virtio_tmp);
+    }
 
     size_t bootargs_len = strlen(bootargs);
     /*  +3*sizeof(int) is a cheap approximated formula for maximum number of characters in a UINT_MAX
