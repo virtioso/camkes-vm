@@ -682,8 +682,69 @@ static void irq_handler(void *data, ps_irq_acknowledge_fn_t acknowledge_fn, void
 
 /* Force the _vmm_module  section to be created even if no modules are defined. */
 static USED SECTION("_vmm_module") struct {} dummy_module;
-extern vmm_module_t __start__vmm_module[];
-extern vmm_module_t __stop__vmm_module[];
+extern vmm_module_t *__start__vmm_module[];
+extern vmm_module_t *__stop__vmm_module[];
+
+static int init_modules(vm_t *vm, vmm_module_t **start, vmm_module_t **stop)
+{
+    for (vmm_module_t **m = start; m < stop; m++) {
+        int err = vmm_module_init(*m, vm);
+        if (err) {
+            ZF_LOGE("vmm_module_init() failed (%d)", err);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static vmm_module_t *vmm_module_find_by_name(const char *name)
+{
+    for (vmm_module_t **m = __start__vmm_module; m < __stop__vmm_module; m++) {
+        if (!strcmp((*m)->name, name)) {
+            return *m;
+        }
+    }
+
+    return NULL;
+}
+
+int vmm_module_init_by_name(const char *name, void *cookie)
+{
+    vmm_module_t *m = vmm_module_find_by_name(name);
+    if (!m) {
+        ZF_LOGE("module %s not found", name);
+        return -1;
+    }
+
+    return vmm_module_init(m, cookie);
+}
+
+int vmm_module_init(vmm_module_t *m, void *cookie)
+{
+    vm_t *vm = cookie;
+
+    if (!m) {
+        return -1;
+    }
+
+    if (m->initialized) {
+        return 0;
+    }
+
+    int err = init_modules(vm, m->deps_start, m->deps_stop);
+    if (err) {
+        ZF_LOGE("init_modules() failed (%d)", err);
+        return -1;
+    }
+
+    ZF_LOGE("module name: %s", m->name);
+    m->init_module(vm, m->cookie);
+
+    m->initialized = true;
+
+    return 0;
+}
 
 static int install_vm_devices(vm_t *vm, const vm_config_t *vm_config)
 {
@@ -705,16 +766,13 @@ static int install_vm_devices(vm_t *vm, const vm_config_t *vm_config)
         }
     }
 
-    int max_vmm_modules = (int)(__stop__vmm_module - __start__vmm_module);
-    int num_vmm_modules = 0;
-    for (vmm_module_t *i = __start__vmm_module; i < __stop__vmm_module; i++) {
-        ZF_LOGE("module name: %s", i->name);
-        i->init_module(vm, i->cookie);
-        num_vmm_modules++;
+    err = init_modules(__start__vmm_module, __stop__vmm_module);
+    if (err) {
+        ZF_LOGE("init_modules() failed (%d)", err);
+        return -1;
     }
 
     return 0;
-
 }
 
 static int route_irq(int irq_num, vm_vcpu_t *vcpu, irq_server_t *irq_server)

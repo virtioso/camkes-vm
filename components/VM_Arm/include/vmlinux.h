@@ -38,6 +38,9 @@ typedef struct vmm_module {
     void *cookie;
     // Function called for setup.
     void (*init_module)(vm_t *vm, void *cookie);
+    bool initialized;
+    struct vmm_module **deps_start;
+    struct vmm_module **deps_stop;
 } ALIGN(32) vmm_module_t;
 
 /**
@@ -70,15 +73,28 @@ int cross_vm_connections_init(vm_t *vm, uintptr_t connection_base_addr, struct c
 /* Declare a module.
  * For now, we put the modules in a separate elf section. */
 #define DEFINE_MODULE(_name, _cookie, _init_module) \
-    __attribute__((used)) __attribute__((section("_vmm_module"))) vmm_module_t VMM_MODULE_ ##_name = { \
-    .name = #_name, \
-    .cookie = _cookie, \
-    .init_module = _init_module, \
-};
+    static USED SECTION("_vmm_module_deps_" #_name) struct {} dummy_dep_##_name; \
+    extern vmm_module_t *__start__vmm_module_deps_##_name[]; \
+    extern vmm_module_t *__stop__vmm_module_deps_##_name[]; \
+    vmm_module_t VMM_MODULE_ ##_name = { \
+        .name = #_name, \
+        .cookie = _cookie, \
+        .init_module = _init_module, \
+        .deps_start = __start__vmm_module_deps_##_name, \
+        .deps_stop = __stop__vmm_module_deps_##_name, \
+    }; \
+    USED SECTION("_vmm_module") vmm_module_t *VMM_MODULE_ptr_ ##_name = &VMM_MODULE_ ##_name;
+
+#define DEFINE_MODULE_DEP(_name, _dep) \
+    extern vmm_module_t VMM_MODULE_ ##_dep; \
+    USED SECTION("_vmm_module_deps_" #_name) vmm_module_t *VMM_MODULE_DEPS_ ## _name ## _ ## _dep = &VMM_MODULE_##_dep;
 
 #define CROSS_VM_CONNECTION(connection_name, connection_symbol) \
     __attribute__((used)) __attribute__((section("_vmm_cross_connector_definition"))) \
     camkes_crossvm_connection_t *connection_name##def = &connection_symbol;
+
+int vmm_module_init(vmm_module_t *m, void *cookie);
+int vmm_module_init_by_name(const char *name, void *cookie);
 
 /**
  * Callback handler to be called when a certain badged event is received.
