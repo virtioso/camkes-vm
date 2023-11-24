@@ -13,8 +13,6 @@
 #include <sel4vmmplatsupport/drivers/cross_vm_connection.h>
 #include <sel4vmmplatsupport/drivers/pci_helper.h>
 
-extern vmm_pci_space_t *pci;
-
 /* Force the _vmm_cross_connector_definition  section to be created even if no modules are defined. */
 static USED SECTION("_vmm_cross_connector_definition") struct {} dummy_module;
 extern camkes_crossvm_connection_t *__start__vmm_cross_connector_definition[];

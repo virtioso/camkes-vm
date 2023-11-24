@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 #include <autoconf.h>
-#include <arm_vm/gen_config.h>
 
 #include <vmlinux.h>
 

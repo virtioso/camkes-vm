@@ -8,7 +8,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <autoconf.h>
-#include <arm_vm/gen_config.h>
 #include <vmlinux.h>
 #include <netinet/ether.h>
 
@@ -21,9 +20,6 @@
 
 static virtio_net_t *virtio_net = NULL;
 static vswitch_t virtio_vswitch;
-
-extern vmm_pci_space_t *pci;
-extern vmm_io_port_list_t *io_ports;
 
 void self_mac(uint8_t *mac)
 {

@@ -5,7 +5,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 #include <autoconf.h>
-#include <arm_vm/gen_config.h>
 #include <sel4muslcsys/gen_config.h>
 
 #include <stdio.h>
@@ -40,9 +39,7 @@
 #include <sel4vmmplatsupport/drivers/virtio_con.h>
 
 #include <sel4vmmplatsupport/arch/vusb.h>
-#include <sel4vmmplatsupport/arch/vpci.h>
 #include <sel4vmmplatsupport/guest_image.h>
-#include <sel4vmmplatsupport/drivers/pci_helper.h>
 #include <sel4vmmplatsupport/drivers/cross_vm_connection.h>
 #include <sel4vmmplatsupport/arch/guest_boot_init.h>
 #include <sel4vmmplatsupport/arch/guest_reboot.h>
@@ -97,8 +94,6 @@ allocman_t *allocman;
 seL4_CPtr _fault_endpoint;
 irq_server_t *_irq_server;
 
-vmm_pci_space_t *pci;
-vmm_io_port_list_t *io_ports;
 reboot_hooks_list_t reboot_hooks_list;
 
 /* So far, 320 KiB was enough for each DTB buffer. Increase if necessary. */
@@ -746,35 +741,6 @@ int vmm_module_init(vmm_module_t *m, void *cookie)
     return 0;
 }
 
-static int install_vm_devices(vm_t *vm, const vm_config_t *vm_config)
-{
-    int err;
-
-    /* Install virtual devices */
-    if (config_set(CONFIG_VM_PCI_SUPPORT)) {
-        err = vm_install_vpci(vm, io_ports, pci);
-        if (err) {
-            ZF_LOGE("Failed to install VPCI device");
-            return -1;
-        }
-        if (vm_config->generate_dtb) {
-            err = fdt_generate_vpci_node_start(vm, gen_dtb_buf);
-            if (err) {
-                ZF_LOGE("fdt_generate_vpci_node_start() failed (%d)", err);
-                return -1;
-            }
-        }
-    }
-
-    err = init_modules(__start__vmm_module, __stop__vmm_module);
-    if (err) {
-        ZF_LOGE("init_modules() failed (%d)", err);
-        return -1;
-    }
-
-    return 0;
-}
-
 static int route_irq(int irq_num, vm_vcpu_t *vcpu, irq_server_t *irq_server)
 {
     ps_irq_t irq = { .type = PS_INTERRUPT, .irq = { .number = irq_num }};
@@ -935,35 +901,6 @@ static int vm_dtb_init(vm_t *vm, const vm_config_t *vm_config)
     return 0;
 }
 
-static int vm_dtb_finalize(vm_t *vm, const vm_config_t *vm_config)
-{
-    assert(vm_config->generate_dtb);
-
-    if (config_set(CONFIG_VM_PCI_SUPPORT)) {
-        /* Modules can add PCI devices, so the PCI device tree node can be
-         * finished only after all modules have been set up.
-         */
-        int gic_offset = fdt_path_offset(fdt_ori, GIC_NODE_PATH);
-        if (gic_offset < 0) {
-            ZF_LOGE("Failed to find gic node from path: %s", GIC_NODE_PATH);
-            return -1;
-        }
-        int gic_phandle = fdt_get_phandle(fdt_ori, gic_offset);
-        if (0 == gic_phandle) {
-            ZF_LOGE("Failed to find phandle in gic node");
-            return -1;
-        }
-        int err = fdt_generate_vpci_node_finish(vm, pci, gen_dtb_buf, gic_phandle);
-        if (err) {
-            ZF_LOGE("Couldn't generate vPCI interrupt map (%d)", err);
-            return -1;
-        }
-    }
-
-    fdt_pack(gen_dtb_buf);
-    return 0;
-}
-
 static int load_generated_dtb(vm_t *vm, uintptr_t paddr, void *addr, size_t size, size_t offset, void *cookie)
 {
     ZF_LOGD("paddr: 0x%lx, addr: 0x%lx, size: 0x%lx, offset: 0x%lx", paddr, (seL4_Word) addr, size, offset);
@@ -1021,11 +958,7 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
     if (vm_config->generate_dtb) {
         ZF_LOGW_IF(vm_config->provide_dtb,
                    "provide_dtb and generate_dtb are both set. The provided dtb will NOT be loaded");
-        err = vm_dtb_finalize(vm, vm_config);
-        if (err) {
-            ZF_LOGE("Couldn't generate DTB (%d)", err);
-            return -1;
-        }
+        fdt_pack(gen_dtb_buf);
         printf("Loading Generated DTB\n");
         vm_ram_mark_allocated(vm, vm_config->dtb_addr, sizeof(gen_dtb_buf));
         vm_ram_touch(vm, vm_config->dtb_addr, sizeof(gen_dtb_buf), load_generated_dtb,
@@ -1256,18 +1189,6 @@ static int main_continued(void)
         return -1;
     }
 
-    err = vmm_pci_init(&pci);
-    if (err) {
-        ZF_LOGE("Failed to initialise vmm pci");
-        return err;
-    }
-
-    err = vmm_io_port_init(&io_ports, FREE_IOPORT_START);
-    if (err) {
-        ZF_LOGE("Failed to initialise VM ioports");
-        return err;
-    }
-
     err = vmm_init(&vm_config);
     assert(!err);
 
@@ -1348,9 +1269,9 @@ static int main_continued(void)
     }
 
     /* Install devices */
-    err = install_vm_devices(&vm, &vm_config);
+    err = init_modules(&vm, __start__vmm_module, __stop__vmm_module);
     if (err) {
-        ZF_LOGE("Error: Failed to install VM devices");
+        ZF_LOGE("init_modules() failed (%d)", err);
         seL4_DebugHalt();
         return -1;
     }

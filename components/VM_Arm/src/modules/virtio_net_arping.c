@@ -8,7 +8,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <autoconf.h>
-#include <arm_vm/gen_config.h>
 #include <vmlinux.h>
 
 #include <camkes.h>
@@ -29,9 +28,6 @@
 #define ARP_REQUEST 0x01
 #define ARP_REPLY 0x02
 #define HW_TYPE 1
-
-extern vmm_pci_space_t *pci;
-extern vmm_io_port_list_t *io_ports;
 
 void self_mac(uint8_t *mac)
 {
