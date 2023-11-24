@@ -49,8 +49,6 @@
 #define NUM_PORTS (ARRAY_SIZE(serial_layout) + 1)
 
 static virtio_con_t *virtio_con = NULL;
-extern vmm_pci_space_t *pci;
-extern vmm_io_port_list_t *io_ports;
 
 /* 4088 because the serial_shmem_t struct has to be 0x1000 bytes big */
 #define BUFSIZE (0x1000 - 2 * sizeof(uint32_t))

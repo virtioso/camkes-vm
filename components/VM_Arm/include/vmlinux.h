@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <arm_vm/gen_config.h>
 #include <sel4utils/irq_server.h>
 #include <sel4vm/guest_vm.h>
 #include <sel4vmmplatsupport/drivers/cross_vm_connection.h>
@@ -16,6 +17,14 @@
 #define MACH_TYPE            MACH_TYPE_SPECIAL
 
 #define FREE_IOPORT_START    0x1000
+
+#ifdef CONFIG_VM_PCI_SUPPORT
+typedef struct vmm_pci_space vmm_pci_space_t;
+typedef struct vmm_io_list vmm_io_port_list_t;
+
+extern vmm_pci_space_t *pci;
+extern vmm_io_port_list_t *io_ports;
+#endif
 
 extern char gen_dtb_buf[];
 extern void *fdt_ori;
