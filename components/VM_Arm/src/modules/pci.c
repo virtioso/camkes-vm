@@ -16,11 +16,22 @@
 vmm_pci_space_t *pci;
 vmm_io_port_list_t *io_ports;
 
+static vmm_pci_flags_t vpci_get_flags(void)
+{
+    vmm_pci_flags_t flags = 0;
+
+    if (pci_config.use_ecam) {
+        flags |= PCI_BUS_ECAM;
+    }
+
+    return flags;
+}
+
 static void vpci_init(vm_t *vm, void *cookie)
 {
     int err;
 
-    err = vmm_pci_init(&pci);
+    err = vmm_pci_init(&pci, vpci_get_flags());
     if (err) {
         ZF_LOGF("Failed to initialise vmm pci");
         /* no return */
