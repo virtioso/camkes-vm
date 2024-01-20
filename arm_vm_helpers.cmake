@@ -136,9 +136,11 @@ function(DeclareCAmkESARMVM init_component)
         TEMPLATE_SOURCES
         seL4AllocatorMempool.template.c
         seL4VMParameters.template.c
+        seL4PCIParameters.template.c
         TEMPLATE_HEADERS
         seL4AllocatorMempool.template.h
         seL4VMParameters.template.h
+        seL4PCIParameters.template.h
     )
 
     if(VmVirtioNetArping

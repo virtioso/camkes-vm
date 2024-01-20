@@ -42,6 +42,26 @@ static void vpci_register_devices(vm_t *vm, void *cookie)
 DEFINE_MODULE(vpci_register_devices, NULL, vpci_register_devices)
 DEFINE_MODULE_DEP(vpci_register_devices, vpci_init)
 
+static int vpci_get_msi_phandle(void)
+{
+    int msi_phandle = -1;
+    if (pci_config.fdt_msi_node_path) {
+        int msi_parent_offset = fdt_path_offset(fdt_ori, pci_config.fdt_msi_node_path);
+        if (msi_parent_offset < 0) {
+            ZF_LOGF("Failed to find msi parent node from path: %s", pci_config.fdt_msi_node_path);
+            /* no return */
+        }
+
+        msi_phandle = fdt_get_phandle(fdt_ori, msi_parent_offset);
+        if (0 == msi_phandle) {
+            ZF_LOGF("Failed to find phandle in msi parent node");
+            /* no return */
+        }
+    }
+
+    return msi_phandle;
+}
+
 static void vpci_install(vm_t *vm, void *cookie)
 {
     int err = vm_install_vpci(vm, io_ports, pci);
@@ -64,9 +84,13 @@ static void vpci_install(vm_t *vm, void *cookie)
         ZF_LOGF("Failed to find phandle in gic node");
         /* no return */
     }
-    err = fdt_generate_vpci_node(vm, pci, gen_dtb_buf, gic_phandle);
+
+    int msi_phandle = vpci_get_msi_phandle();
+
+    err = fdt_generate_vpci_node(vm, pci, gen_dtb_buf, gic_phandle,
+                                 msi_phandle);
     if (err) {
-        ZF_LOGF("Couldn't generate vPCI interrupt map (%d)", err);
+        ZF_LOGF("Couldn't generate vPCI node (%d)", err);
         /* no return */
     }
 }
