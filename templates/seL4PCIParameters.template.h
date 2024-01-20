@@ -6,7 +6,10 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 typedef struct {
+    bool use_ecam;
     char const *fdt_msi_node_path;
 } pci_config_t;
 

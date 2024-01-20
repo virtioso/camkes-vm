@@ -786,7 +786,7 @@ void *main_continued(void *arg)
         remaining -= allocate;
     }
 
-    error = vmm_pci_init(&pci);
+    error = vmm_pci_init(&pci, 0);
     if (error) {
         ZF_LOGF_IF(error, "Failed to initialise VMM PCI");
     }
