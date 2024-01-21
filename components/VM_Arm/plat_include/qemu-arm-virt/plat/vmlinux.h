@@ -10,7 +10,7 @@
 
 static const int linux_pt_irqs[] = {};
 
-static const int free_plat_interrupts[] =  { 50 + IRQ_SPI_OFFSET };
+static const int free_plat_interrupts[] =  { 112 + IRQ_SPI_OFFSET };
 static const char *plat_keep_devices[] = {
     "/timer",
     "/apb-pclk",
