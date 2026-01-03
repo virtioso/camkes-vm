@@ -15,13 +15,14 @@ extern int start_extra_frame_caps;
 static vm_frame_t map_frame_hack_iterator(uintptr_t addr, void *cookie)
 {
     int error;
-    vm_frame_t frame_result = { seL4_CapNull, seL4_NoRights, 0, 0 };
+    vm_frame_t frame_result = { seL4_CapNull, seL4_NoRights, 0, 0, 1 };
 
     int cap_idx = (extra_frame_map_address - addr) / BIT(PAGE_BITS_4K);
     frame_result.cptr = start_extra_frame_caps + cap_idx;
     frame_result.rights = seL4_AllRights;
     frame_result.vaddr = addr;
     frame_result.size_bits = PAGE_BITS_4K;
+    frame_result.cacheable = 1;  /* Normal memory */
 
     return frame_result;
 }

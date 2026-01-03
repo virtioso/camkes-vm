@@ -4,12 +4,14 @@
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
+#define ZF_LOG_LEVEL ZF_LOG_DEBUG
 #include <autoconf.h>
 #include <sel4muslcsys/gen_config.h>
 
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+#include <inttypes.h>
 #include <setjmp.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -667,6 +669,10 @@ static void irq_handler(void *data, ps_irq_acknowledge_fn_t acknowledge_fn, void
     /* Fill in the rest of the details */
     token->acknowledge_fn = acknowledge_fn;
     token->ack_data = ack_data;
+    /* Debug: log HSP doorbell IRQ */
+    if (token->virq == 208) {
+        printf("irq_handler: HSP doorbell IRQ 208 received, injecting to guest\n");
+    }
     int err;
     err = vm_inject_irq(token->vm->vcpus[BOOT_VCPU], token->virq);
     if (err) {
@@ -920,6 +926,8 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
     err = vm_load_guest_kernel(vm, vm_config->files.kernel, vm_config->ram.base,
                                0, &kernel_image_info);
     entry = kernel_image_info.kernel_image.load_paddr;
+    ZF_LOGD("Kernel load_paddr: 0x%" PRIxPTR ", ram.base: 0x%" PRIxPTR,
+            entry, vm_config->ram.base);
     if (!entry || err) {
         return -1;
     }
@@ -1071,6 +1079,7 @@ static int alloc_vm_device_cap(uintptr_t addr, vm_t *vm, vm_frame_t *frame_resul
     frame_result->rights = seL4_AllRights;
     frame_result->vaddr = addr;
     frame_result->size_bits = seL4_PageBits;
+    frame_result->cacheable = 0;  /* Device memory - non-cacheable (S2_DEVICE_nGnRnE) */
     return 0;
 }
 
@@ -1089,6 +1098,7 @@ static int alloc_vm_ram_cap(uintptr_t addr, vm_t *vm, vm_frame_t *frame_result)
     frame_result->rights = seL4_AllRights;
     frame_result->vaddr = addr;
     frame_result->size_bits = seL4_PageBits;
+    frame_result->cacheable = 1;  /* RAM - cacheable (S2_NORMAL) */
     return 0;
 }
 
@@ -1096,7 +1106,7 @@ static vm_frame_t on_demand_iterator(uintptr_t addr, void *cookie)
 {
     int err;
     uintptr_t paddr = PAGE_ALIGN(addr, SIZE_BITS_TO_BYTES(seL4_PageBits));
-    vm_frame_t frame_result = { seL4_CapNull, seL4_NoRights, 0, 0 };
+    vm_frame_t frame_result = { seL4_CapNull, seL4_NoRights, 0, 0, 1 };
     vm_t *vm = (vm_t *)cookie;
     /* Attempt allocating device memory */
     err = alloc_vm_device_cap(paddr, vm, &frame_result);
