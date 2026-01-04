@@ -107,6 +107,20 @@ void *fdt_ori;
 
 struct ps_io_ops _io_ops;
 
+/*
+ * Platform-specific DTB customization hook.
+ * Called after DTB generation but before fdt_pack().
+ * Platforms can override to add/modify DTB nodes programmatically.
+ *
+ * @param vm      VM handle
+ * @param dtb_buf Generated DTB buffer (gen_dtb_buf)
+ * @return 0 on success, negative on error
+ */
+int WEAK fdt_plat_customize(vm_t *vm, void *dtb_buf)
+{
+    return 0;
+}
+
 static jmp_buf restart_jmp_buf;
 
 void camkes_make_simple(simple_t *simple);
@@ -669,10 +683,6 @@ static void irq_handler(void *data, ps_irq_acknowledge_fn_t acknowledge_fn, void
     /* Fill in the rest of the details */
     token->acknowledge_fn = acknowledge_fn;
     token->ack_data = ack_data;
-    /* Debug: log HSP doorbell IRQ */
-    if (token->virq == 208) {
-        printf("irq_handler: HSP doorbell IRQ 208 received, injecting to guest\n");
-    }
     int err;
     err = vm_inject_irq(token->vm->vcpus[BOOT_VCPU], token->virq);
     if (err) {
@@ -966,6 +976,14 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
     if (vm_config->generate_dtb) {
         ZF_LOGW_IF(vm_config->provide_dtb,
                    "provide_dtb and generate_dtb are both set. The provided dtb will NOT be loaded");
+
+        /* Platform-specific DTB customization hook */
+        err = fdt_plat_customize(vm, gen_dtb_buf);
+        if (err) {
+            ZF_LOGE("fdt_plat_customize() failed (%d)", err);
+            return -1;
+        }
+
         fdt_pack(gen_dtb_buf);
         printf("Loading Generated DTB\n");
         vm_ram_mark_allocated(vm, vm_config->dtb_addr, sizeof(gen_dtb_buf));

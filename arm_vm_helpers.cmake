@@ -74,6 +74,14 @@ function(DeclareCAmkESARMVM init_component)
         list(APPEND vm_src ${platform_module})
     endif()
 
+    # Platform-specific DTB customization (fdt_plat_customize override)
+    set(platform_fdt_module
+        ${ARM_VM_PROJECT_DIR}/components/VM_Arm/src/modules/plat/${KernelPlatform}/fdt.c
+    )
+    if(EXISTS ${platform_fdt_module})
+        list(APPEND vm_src ${platform_fdt_module})
+    endif()
+
     # Append virtio net sources if the virtio net config is enabled
     if(VmVirtioNetArping)
         list(APPEND vm_src ${ARM_VM_PROJECT_DIR}/components/VM_Arm/src/modules/virtio_net_arping.c)
