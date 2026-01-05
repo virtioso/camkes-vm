@@ -105,7 +105,7 @@ const vm_config_t vm_config = {
     .map_one_to_one = 0,
 #endif
 
-#if defined(CONFIG_PLAT_TX1) || defined(CONFIG_PLAT_TX2)
+#if defined(CONFIG_PLAT_TX1) || defined(CONFIG_PLAT_TX2) || defined(CONFIG_PLAT_ORIN_AGX)
     .clean_cache = 1,
 #else
     .clean_cache = 0,
