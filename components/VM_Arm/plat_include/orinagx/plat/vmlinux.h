@@ -63,8 +63,6 @@ static const char *plat_keep_device_and_disable[] = {
  * These nodes are needed for Linux boot but have no hardware MMIO:
  */
 static const char *plat_keep_device_and_subtree[] = {
-    "/firmware",
-    "/sram@40000000",  /* SRAM container - child shmem in devices.camkes dtb() */
 };
 
 static const char *plat_keep_device_and_subtree_and_disable[] = {
