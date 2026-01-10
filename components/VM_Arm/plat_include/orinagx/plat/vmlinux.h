@@ -42,6 +42,7 @@ static const int free_plat_interrupts[] = { 400 + GIC_SPI_INTID_BASE };
 
 /* Devices to keep in guest device tree */
 static const char *plat_keep_devices[] = {
+    "/reserved-memory",
     "/timer",
     "/psci",
     GIC_NODE_PATH,
@@ -62,7 +63,6 @@ static const char *plat_keep_device_and_disable[] = {
  * These nodes are needed for Linux boot but have no hardware MMIO:
  */
 static const char *plat_keep_device_and_subtree[] = {
-    "/reserved-memory",
     "/firmware",
     "/sram@40000000",  /* SRAM container - child shmem in devices.camkes dtb() */
 };
