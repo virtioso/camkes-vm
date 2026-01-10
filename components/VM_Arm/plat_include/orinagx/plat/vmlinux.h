@@ -51,19 +51,20 @@ static const char *plat_keep_device_and_disable[] = {
 };
 
 /* Devices to keep with full subtree.
- * NOTE: /serial (TCU) is NOT listed here - it's added programmatically by
- * fdt_plat_customize() in src/modules/plat/orinagx/fdt.c with correct
- * HSP AON phandle reference for the mboxes property. */
+ *
+ * IMPORTANT: Only list truly EMULATED devices here (not passthrough).
+ * Passthrough devices with hardware access should be listed in devices.camkes
+ * dtb() queries, which handles both DTB generation AND device frame allocation.
+ *
+ * Emulated devices (no hardware access, handled by VMM):
+ * - /timer, /psci, GIC are in plat_keep_devices above
+ *
+ * These nodes are needed for Linux boot but have no hardware MMIO:
+ */
 static const char *plat_keep_device_and_subtree[] = {
-    "/bus@0",                   /* simple-bus parent - required for child probing */
-    "/bus@0/misc@100000",       /* APB MISC - for tegra_is_silicon() */
-    "/bus@0/serial@31d0000",    /* UARTI - PL011 UART (earlycon/backup) */
-    "/bus@0/hsp@c150000",       /* HSP AON - for TCU mailbox */
-    "/bus@0/hsp@3c00000",       /* HSP Top0 - BPMP doorbell */
-    "/sram@40000000",           /* CPU-BPMP shared memory */
-    "/bpmp",                    /* BPMP for clocks/resets/power */
     "/reserved-memory",
     "/firmware",
+    "/sram@40000000",  /* SRAM container - child shmem in devices.camkes dtb() */
 };
 
 static const char *plat_keep_device_and_subtree_and_disable[] = {
