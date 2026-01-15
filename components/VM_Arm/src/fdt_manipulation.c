@@ -42,9 +42,21 @@ const char *WEAK append_vm_virtio_device_cmdline(char *buffer);
 
 int fdt_generate_chosen_node(void *fdt, const char *stdout_path, const char *bootargs, const unsigned int maxcpus)
 {
-    int root_offset = fdt_path_offset(fdt, "/");
-    int this = fdt_add_subnode(fdt, root_offset, "chosen");
     int err;
+
+    /* Check if /chosen already exists (e.g., created by platform customization) */
+    int this = fdt_path_offset(fdt, "/chosen");
+    if (this < 0) {
+        /* Create /chosen if it doesn't exist */
+        int root_offset = fdt_path_offset(fdt, "/");
+        if (root_offset < 0) {
+            return root_offset;
+        }
+        this = fdt_add_subnode(fdt, root_offset, "chosen");
+        if (this < 0) {
+            return this;
+        }
+    }
 
     if (stdout_path && strlen(stdout_path) > 0) {
         err = fdt_appendprop_string(fdt, this, "stdout-path", stdout_path);
