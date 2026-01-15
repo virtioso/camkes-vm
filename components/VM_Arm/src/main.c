@@ -4,7 +4,9 @@
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
-#define ZF_LOG_LEVEL ZF_LOG_DEBUG
+
+#define ZF_LOG_LEVEL ZF_LOG_INFO
+
 #include <autoconf.h>
 #include <sel4muslcsys/gen_config.h>
 
@@ -119,6 +121,62 @@ struct ps_io_ops _io_ops;
 int WEAK fdt_plat_customize(vm_t *vm, void *dtb_buf)
 {
     return 0;
+}
+
+/* Base64 encoding for DTB dump */
+static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static size_t base64_encode_buf(const uint8_t *input, size_t input_len, char *output)
+{
+    size_t i, j;
+    for (i = 0, j = 0; i < input_len; i += 3) {
+        uint32_t octet_a = input[i];
+        uint32_t octet_b = (i + 1 < input_len) ? input[i + 1] : 0;
+        uint32_t octet_c = (i + 2 < input_len) ? input[i + 2] : 0;
+        uint32_t triple = (octet_a << 16) | (octet_b << 8) | octet_c;
+
+        output[j++] = b64_table[(triple >> 18) & 0x3F];
+        output[j++] = b64_table[(triple >> 12) & 0x3F];
+        output[j++] = (i + 1 < input_len) ? b64_table[(triple >> 6) & 0x3F] : '=';
+        output[j++] = (i + 2 < input_len) ? b64_table[triple & 0x3F] : '=';
+    }
+    output[j] = '\0';
+    return j;
+}
+
+#define DTB_DUMP_LINE_LEN 76  /* Standard base64 line length */
+
+static void dump_dtb_base64(const void *dtb)
+{
+    uint32_t dtb_size = fdt_totalsize(dtb);
+    size_t b64_size = ((dtb_size + 2) / 3) * 4 + 1;
+
+    ZF_LOGI("DTB_DUMP_START size=%u", dtb_size);
+
+    char *b64_buf = malloc(b64_size);
+    if (!b64_buf) {
+        ZF_LOGE("Failed to allocate base64 buffer for DTB dump");
+        return;
+    }
+
+    base64_encode_buf((const uint8_t *)dtb, dtb_size, b64_buf);
+
+    /* Print in chunks to avoid line length issues */
+    char line[DTB_DUMP_LINE_LEN + 1];
+    size_t offset = 0;
+    size_t total_len = strlen(b64_buf);
+
+    while (offset < total_len) {
+        size_t chunk = (total_len - offset > DTB_DUMP_LINE_LEN)
+                       ? DTB_DUMP_LINE_LEN : (total_len - offset);
+        memcpy(line, b64_buf + offset, chunk);
+        line[chunk] = '\0';
+        ZF_LOGI("%s", line);
+        offset += chunk;
+    }
+
+    free(b64_buf);
+    ZF_LOGI("DTB_DUMP_END");
 }
 
 static jmp_buf restart_jmp_buf;
@@ -1129,7 +1187,7 @@ static vm_frame_t on_demand_iterator(uintptr_t addr, void *cookie)
     /* Attempt allocating device memory */
     err = alloc_vm_device_cap(paddr, vm, &frame_result);
     if (!err) {
-        printf("OnDemandInstall: Created device-backed memory for addr 0x%"PRIxPTR"\n", addr);
+        ZF_LOGD("OnDemandInstall: Created device-backed memory for addr 0x%"PRIxPTR"\n", addr);
         return frame_result;
     }
     /* Attempt allocating ram memory */
@@ -1137,7 +1195,7 @@ static vm_frame_t on_demand_iterator(uintptr_t addr, void *cookie)
     if (err) {
         ZF_LOGE("Failed to create on demand memory for addr 0x%"PRIxPTR, addr);
     }
-    printf("OnDemandInstall: Created RAM-backed memory for addr 0x%"PRIxPTR"\n", addr);
+    ZF_LOGD("OnDemandInstall: Created RAM-backed memory for addr 0x%"PRIxPTR"\n", addr);
     return frame_result;
 }
 
@@ -1311,6 +1369,9 @@ static int main_continued(void)
         seL4_DebugHalt();
         return -1;
     }
+
+    /* Dump DTB before starting VM */
+    dump_dtb_base64(gen_dtb_buf);
 
     err = vcpu_start(vm_vcpu);
     if (err) {
