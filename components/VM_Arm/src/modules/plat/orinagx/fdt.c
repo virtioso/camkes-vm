@@ -238,6 +238,11 @@ static int fdt_add_mgbe_mac_address(void *fdt)
  *
  * Called after CAmkES generates the base DTB from fdtgen but before fdt_pack().
  * This allows us to add nodes with correct phandle references.
+ *
+ * For multi-VM support, each operation is conditional on the presence of
+ * required devices. This allows the same hook to work for both:
+ * - Device VM (VM0): Has full hardware passthrough (HSP, GPIO, MGBE)
+ * - Driver VM (VM1): Minimal hardware, only virtio interfaces
  */
 int fdt_plat_customize(vm_t *vm, void *dtb_buf)
 {
@@ -251,18 +256,34 @@ int fdt_plat_customize(vm_t *vm, void *dtb_buf)
         return -1;
     }
 
-    /* Add PMC node for GPIO hierarchical IRQ mode */
-    err = fdt_add_pmc_node(dtb_buf, gic_phandle);
-    if (err) {
-        ZF_LOGE("Cannot add PMC node (%d)", err);
-        return -1;
+    /*
+     * Add PMC node for GPIO hierarchical IRQ mode.
+     * Only generate if GPIO node is present (Device VM).
+     */
+    int gpio_off = fdt_path_offset(dtb_buf, "/bus@0/gpio@2200000");
+    if (gpio_off >= 0) {
+        err = fdt_add_pmc_node(dtb_buf, gic_phandle);
+        if (err) {
+            ZF_LOGE("Cannot add PMC node (%d)", err);
+            return -1;
+        }
+    } else {
+        ZF_LOGI("GPIO node not present, skipping PMC generation");
     }
 
-    /* Add MAC address to /chosen for MGBE0 (nvethernet) */
-    err = fdt_add_mgbe_mac_address(dtb_buf);
-    if (err) {
-        ZF_LOGE("Cannot add MGBE MAC address (%d)", err);
-        return -1;
+    /*
+     * Add MAC address to /chosen for MGBE0 (nvethernet).
+     * Only generate if MGBE node is present (Device VM).
+     */
+    int mgbe_off = fdt_path_offset(dtb_buf, "/bus@0/ethernet@6800000");
+    if (mgbe_off >= 0) {
+        err = fdt_add_mgbe_mac_address(dtb_buf);
+        if (err) {
+            ZF_LOGE("Cannot add MGBE MAC address (%d)", err);
+            return -1;
+        }
+    } else {
+        ZF_LOGI("MGBE node not present, skipping MAC address generation");
     }
 
     return 0;
