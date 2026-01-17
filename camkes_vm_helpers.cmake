@@ -308,6 +308,87 @@ function(AddToFileServer filename_pref file_dest)
 
 endfunction(AddToFileServer)
 
+# Function for adding an LZ4-compressed file to file server. The file is compressed
+# during the build process using lz4 with --content-size flag (required for decompression).
+#
+# filename_pref: Name used for the file in the archive (with .lz4 appended)
+# file_dest: Path to the uncompressed source file
+# INSTANCE: Optional file server instance name (defaults to "fserv")
+# DEPENDS: Optional additional dependencies
+#
+# Example:
+#   AddToFileServerCompressed("linux" "${VM_IMAGE_LINUX}")
+#   # Results in "linux.lz4" being added to the FileServer
+#
+function(AddToFileServerCompressed filename_pref file_dest)
+
+    cmake_parse_arguments(
+        PARSE_ARGV
+        2
+        PARAM # variable prefix
+        "" # option arguments
+        "INSTANCE" # optional single value arguments
+        "DEPENDS" # optional multi value arguments
+    )
+
+    if(PARAM_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR "Unknown arguments: ${PARAM_UNPARSED_ARGUMENTS}")
+    endif()
+
+    if(NOT PARAM_INSTANCE)
+        set(PARAM_INSTANCE "fserv")
+    endif()
+
+    # Create output filename with .lz4 extension
+    set(compressed_filename "${filename_pref}.lz4")
+    set(compressed_file "${CMAKE_CURRENT_BINARY_DIR}/${PARAM_INSTANCE}/${compressed_filename}")
+
+    # Create directory for compressed file
+    get_filename_component(compressed_dir "${compressed_file}" DIRECTORY)
+
+    # Find lz4 tool
+    find_program(LZ4_TOOL lz4)
+    if(NOT LZ4_TOOL)
+        message(FATAL_ERROR "lz4 tool not found. Please install lz4 (apt install lz4)")
+    endif()
+
+    # Add custom command to compress the file
+    # --content-size: Include uncompressed size in header (required for decompression)
+    # -9: Maximum compression
+    # -f: Force overwrite
+    add_custom_command(
+        OUTPUT "${compressed_file}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${compressed_dir}"
+        COMMAND ${LZ4_TOOL} -9 -f --content-size "${file_dest}" "${compressed_file}"
+        DEPENDS "${file_dest}" ${PARAM_DEPENDS}
+        COMMENT "LZ4 compressing ${file_dest} -> ${compressed_filename}"
+        VERBATIM
+    )
+
+    # Create a target for the compression
+    set(compress_target "lz4_compress_${PARAM_INSTANCE}_${filename_pref}")
+    add_custom_target(${compress_target} DEPENDS "${compressed_file}")
+
+    # Add compressed file to FileServer
+    set(FSRV_TARGET "vm_fileserver_config_${PARAM_INSTANCE}")
+    if(NOT TARGET ${FSRV_TARGET})
+        add_custom_target(${FSRV_TARGET})
+    endif()
+
+    set_property(
+        TARGET ${FSRV_TARGET}
+        APPEND
+        PROPERTY FILES "${compressed_filename}:${compressed_file}"
+    )
+
+    set_property(
+        TARGET ${FSRV_TARGET}
+        APPEND
+        PROPERTY DEPS ${compress_target}
+    )
+
+endfunction(AddToFileServerCompressed)
+
 # Function for decompressing/extracting a vmlinux file from a given kernel image
 # decompress_target: The target name the caller wishes to use to generate the decompressed kernel
 # image
