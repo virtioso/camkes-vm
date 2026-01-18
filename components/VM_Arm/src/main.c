@@ -109,20 +109,6 @@ void *fdt_ori;
 
 struct ps_io_ops _io_ops;
 
-/*
- * Platform-specific DTB customization hook.
- * Called after DTB generation but before fdt_pack().
- * Platforms can override to add/modify DTB nodes programmatically.
- *
- * @param vm      VM handle
- * @param dtb_buf Generated DTB buffer (gen_dtb_buf)
- * @return 0 on success, negative on error
- */
-int WEAK fdt_plat_customize(vm_t *vm, void *dtb_buf)
-{
-    return 0;
-}
-
 /* Base64 encoding for DTB dump */
 static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -1032,15 +1018,14 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
     }
 
     if (vm_config->generate_dtb) {
-        ZF_LOGW_IF(vm_config->provide_dtb,
-                   "provide_dtb and generate_dtb are both set. The provided dtb will NOT be loaded");
-
-        /* Platform-specific DTB customization hook */
-        err = fdt_plat_customize(vm, gen_dtb_buf);
+        err = vmm_module_init_by_name("fdt_plat_customize", vm_config->vm);
         if (err) {
-            ZF_LOGE("fdt_plat_customize() failed (%d)", err);
+            ZF_LOGE("vmm_module_init_by_name() failed");
             return -1;
         }
+
+        ZF_LOGW_IF(vm_config->provide_dtb,
+                   "provide_dtb and generate_dtb are both set. The provided dtb will NOT be loaded");
 
         fdt_pack(gen_dtb_buf);
         printf("Loading Generated DTB\n");
