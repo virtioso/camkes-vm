@@ -60,10 +60,13 @@ typedef struct vmm_module {
 int get_crossvm_irq_num(void);
 
 struct camkes_crossvm_connection {
+    /* Data-plane dataport (legacy and split modes). */
     dataport_caps_handle_t *handle;
     emit_fn emit_fn;
     seL4_Word consume_badge;
     const char *connection_name;
+    /* Optional control-plane dataport (split mode). */
+    dataport_caps_handle_t *control_handle;
 };
 
 typedef struct camkes_crossvm_connection camkes_crossvm_connection_t;

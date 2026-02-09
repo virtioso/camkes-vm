@@ -33,15 +33,15 @@ int cross_vm_connections_init(vm_t *vm, uintptr_t connection_base_addr, struct c
     }
     for (int i = 0; i < num_connections; i++) {
         /* Initialise crossvm dataport handle */
-        crossvm_dataport_handle_t *dp_handle = calloc(1, sizeof(crossvm_dataport_handle_t));
-        if (!dp_handle) {
+        crossvm_dataport_handle_t *data_dp_handle = calloc(1, sizeof(crossvm_dataport_handle_t));
+        if (!data_dp_handle) {
             ZF_LOGE("Failed to initialse cross vm connection dataport %d", i);
             return -1;
         }
         dataport_caps_handle_t *handle = connections[i].handle;
-        dp_handle->frame_size_bits = handle->get_frame_size_bits();
-        dp_handle->num_frames = handle->get_num_frame_caps();
-        dp_handle->frames = handle->get_frame_caps();
+        data_dp_handle->frame_size_bits = handle->get_frame_size_bits();
+        data_dp_handle->num_frames = handle->get_num_frame_caps();
+        data_dp_handle->frames = handle->get_frame_caps();
 
         /* Initialise consume event connection callbacks */
         if (connections[i].consume_event.reg_callback) {
@@ -50,9 +50,24 @@ int cross_vm_connections_init(vm_t *vm, uintptr_t connection_base_addr, struct c
         }
 
         /* Initialise crossvm connection */
-        crossvm_connections[i].dataport = dp_handle;
+        crossvm_connections[i].dataport = data_dp_handle;
+        crossvm_connections[i].control_dataport = NULL;
         crossvm_connections[i].emit_fn = connections[i].emit_fn;
         crossvm_connections[i].consume_id = (seL4_Word)connections[i].consume_event.id;
+
+        if (connections[i].control_handle) {
+            crossvm_dataport_handle_t *control_dp_handle = calloc(1, sizeof(crossvm_dataport_handle_t));
+            if (!control_dp_handle) {
+                ZF_LOGE("Failed to initialise control dataport %d", i);
+                free(data_dp_handle);
+                return -1;
+            }
+            dataport_caps_handle_t *control_handle = connections[i].control_handle;
+            control_dp_handle->frame_size_bits = control_handle->get_frame_size_bits();
+            control_dp_handle->num_frames = control_handle->get_num_frame_caps();
+            control_dp_handle->frames = control_handle->get_frame_caps();
+            crossvm_connections[i].control_dataport = control_dp_handle;
+        }
     }
 
     int ret = cross_vm_connections_init_common(vm, connection_base_addr, crossvm_connections, num_connections,
