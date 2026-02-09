@@ -19,9 +19,12 @@ struct camkes_consumes_event {
 };
 
 struct camkes_crossvm_connection {
+    /* Data-plane dataport (legacy and split modes). */
     dataport_caps_handle_t *handle;
     emit_fn emit_fn;
     struct camkes_consumes_event consume_event;
+    /* Optional control-plane dataport (split mode). */
+    dataport_caps_handle_t *control_handle;
 };
 
 /**

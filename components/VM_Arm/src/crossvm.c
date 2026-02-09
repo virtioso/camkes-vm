@@ -22,21 +22,38 @@ extern camkes_crossvm_connection_t *__stop__vmm_cross_connector_definition[];
 static int setup_connection(crossvm_handle_t *crossvm_connections, size_t index,
                             camkes_crossvm_connection_t *connection)
 {
-    crossvm_dataport_handle_t *dp_handle = calloc(1, sizeof(crossvm_dataport_handle_t));
-    if (!dp_handle) {
+    crossvm_dataport_handle_t *data_dp_handle = calloc(1, sizeof(crossvm_dataport_handle_t));
+    if (!data_dp_handle) {
         ZF_LOGE("Failed to initialize cross vm connection dataport %zd", index);
         return -1;
     }
 
     dataport_caps_handle_t *handle = connection->handle;
-    dp_handle->frame_size_bits = handle->get_frame_size_bits();
-    dp_handle->num_frames = handle->get_num_frame_caps();
-    dp_handle->frames = handle->get_frame_caps();
+    data_dp_handle->frame_size_bits = handle->get_frame_size_bits();
+    data_dp_handle->num_frames = handle->get_num_frame_caps();
+    data_dp_handle->frames = handle->get_frame_caps();
 
-    crossvm_connections[index].dataport = dp_handle;
+    crossvm_connections[index].dataport = data_dp_handle;
+    crossvm_connections[index].control_dataport = NULL;
     crossvm_connections[index].emit_fn = connection->emit_fn;
     crossvm_connections[index].consume_id = connection->consume_badge;
     crossvm_connections[index].connection_name = connection->connection_name;
+
+    if (connection->control_handle) {
+        crossvm_dataport_handle_t *control_dp_handle = calloc(1, sizeof(crossvm_dataport_handle_t));
+        if (!control_dp_handle) {
+            ZF_LOGE("Failed to initialize control dataport %zd", index);
+            free(data_dp_handle);
+            return -1;
+        }
+
+        dataport_caps_handle_t *control_handle = connection->control_handle;
+        control_dp_handle->frame_size_bits = control_handle->get_frame_size_bits();
+        control_dp_handle->num_frames = control_handle->get_num_frame_caps();
+        control_dp_handle->frames = control_handle->get_frame_caps();
+        crossvm_connections[index].control_dataport = control_dp_handle;
+    }
+
     return 0;
 }
 
