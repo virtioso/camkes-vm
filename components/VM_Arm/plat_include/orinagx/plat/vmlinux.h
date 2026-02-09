@@ -1,5 +1,5 @@
 /*
- * Copyright 2024, Technology Innovation Institute
+ * Copyright 2026, Unikie
  *
  * SPDX-License-Identifier: BSD-2-Clause
  *
@@ -11,6 +11,7 @@
 
 /* GIC SPI interrupt base (after SGI and PPI) */
 #define GIC_SPI_INTID_BASE      (32)
+#define IRQ_SPI_OFFSET          GIC_SPI_INTID_BASE
 
 /* ARM generic timer PPI */
 #define ORINAGX_IRQ_PPI_VTIMER  (27)
@@ -36,7 +37,13 @@ typedef enum IRQConstants {
  */
 static const int linux_pt_irqs[] = {};
 
-static const int free_plat_interrupts[] = { 400 + GIC_SPI_INTID_BASE };
+/*
+ * Cross-VM connector IRQ reserve.
+ *
+ * Keep this in 8-bit range (<=255) because legacy PCI interrupt_line is 8-bit.
+ * Current selection avoids VM PCI INTx lines used by vPCI devices.
+ */
+static const int free_plat_interrupts[] = { 236 };
 
 #define GIC_NODE_PATH "/bus@0/interrupt-controller@f400000"
 
