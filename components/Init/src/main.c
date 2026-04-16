@@ -65,6 +65,7 @@
 #define ALLOCMAN_VIRTUAL_SIZE 400000000
 #define CROSS_VM_EVENT_IRQ_NUM 12
 #define CROSS_VM_BASE_ADDRESS 0xa0000000
+#define X86_GUEST_KERNEL_LOAD_PADDR 0x1000000
 
 extern void *fs_buf;
 
@@ -250,6 +251,7 @@ static memory_range_t guest_fake_devices[] = {
 
 /* Memory areas we reserve for anonymous allocations */
 static memory_range_t free_anonymous_regions[] = {
+    {0x100000, 0x10000000 - 0x100000},
     {0x10003000, 0xa0000000 - 0x10003000},
 };
 
@@ -883,6 +885,11 @@ void *main_continued(void *arg)
     uintptr_t kernel_region_size;
     error = vm_ram_find_largest_free_region(&vm, &kernel_load_addr, &kernel_region_size);
     ZF_LOGF_IF(error, "Unable to find ram region for loading kernel image");
+#ifdef CONFIG_ARCH_X86
+    ZF_LOGF_IF(kernel_region_size < X86_GUEST_KERNEL_LOAD_PADDR,
+               "Not enough low guest RAM to place kernel at 0x%x", X86_GUEST_KERNEL_LOAD_PADDR);
+    kernel_load_addr = MAX(kernel_load_addr, (uintptr_t)X86_GUEST_KERNEL_LOAD_PADDR);
+#endif
     guest_kernel_image_t guest_kernel_image;
     guest_kernel_image.kernel_image_arch.is_reloc_enabled = !(strcmp(kernel_relocs, "") == 0);
     guest_kernel_image.kernel_image_arch.relocs_file = kernel_relocs;
