@@ -313,6 +313,10 @@ ioport_fault_result_t i8254_port_in(vm_vcpu_t *vcpu, void *cookie, unsigned int 
                                     unsigned int *result);
 ioport_fault_result_t i8254_port_out(vm_vcpu_t *vcpu, void *cookie, unsigned int port_no, unsigned int size,
                                      unsigned int value);
+ioport_fault_result_t speaker_port_in(vm_vcpu_t *vcpu, void *cookie, unsigned int port_no, unsigned int size,
+                                      unsigned int *result);
+ioport_fault_result_t speaker_port_out(vm_vcpu_t *vcpu, void *cookie, unsigned int port_no, unsigned int size,
+                                       unsigned int value);
 
 ioport_fault_result_t cmos_port_in(vm_vcpu_t *vcpu, void *cookie, unsigned int port_no, unsigned int size,
                                    unsigned int *result);
@@ -331,6 +335,7 @@ ioport_desc_t ioport_handlers[] = {
 //    {X86_IO_PCI_CONFIG_START, X86_IO_PCI_CONFIG_END, vmm_pci_io_port_in, vmm_pci_io_port_out, "PCI Configuration"},
     {X86_IO_RTC_START,        X86_IO_RTC_END,        cmos_port_in, cmos_port_out, "CMOS Registers / RTC Real-Time Clock / NMI Interrupts"},
     {X86_IO_PIT_START,        X86_IO_PIT_END,        i8254_port_in, i8254_port_out, "8253/8254 Programmable Interval Timer"},
+    {0x61,                    0x61,                  speaker_port_in, speaker_port_out, "PC Speaker / PIT Channel 2 Gate"},
 //    {X86_IO_PS2C_START,       X86_IO_PS2C_END,       NULL, NULL, "8042 PS/2 Controller"},
 //    {X86_IO_POS_START,        X86_IO_POS_END,        NULL, NULL, "POS Programmable Option Select (PS/2)"},
 
@@ -478,12 +483,18 @@ void serial_character_interrupt(void);
  */
 extern seL4_Word init_timer_notification_badge(void);
 extern seL4_Word serial_getchar_notification_badge(void);
+static unsigned timer_badge_log_count;
+static unsigned host_irq_log_count;
 
 static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo_t tag, void *cookie)
 {
     if (badge & BIT(27)) {
         if ((badge & init_timer_notification_badge()) == init_timer_notification_badge()) {
             uint32_t completed = init_timer_completed();
+            if (timer_badge_log_count < 32) {
+                ZF_LOGE("Init timer badge completed=0x%x", completed);
+                timer_badge_log_count++;
+            }
             if (completed & BIT(TIMER_PIT)) {
                 pit_timer_interrupt();
             }
@@ -506,6 +517,10 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
         }
         for (int i = 0; i < 16; i++) {
             if ((badge & irq_badges[i]) == irq_badges[i]) {
+                if (host_irq_log_count < 32) {
+                    ZF_LOGE("External IRQ badge irq=%d", i);
+                    host_irq_log_count++;
+                }
                 vm_inject_irq(vm->vcpus[BOOT_VCPU], i);
             }
         }
@@ -709,6 +724,9 @@ void *main_continued(void *arg)
     ZF_LOGI("serial pre init");
     serial_pre_init();
 
+    uint64_t tsc_frequency = init_timer_tsc_frequency();
+    ZF_LOGE("Init timer TSC frequency: %llu", (unsigned long long)tsc_frequency);
+
     ZF_LOGI("Pit pre init");
     pit_pre_init();
 
@@ -717,7 +735,6 @@ void *main_continued(void *arg)
 
 #ifdef CONFIG_VMM_USE_HPET
     ZF_LOGI("HPET pre init\n");
-    uint64_t tsc_frequency = init_timer_tsc_frequency();
     hpet_pre_init(tsc_frequency,
                   TIMER_HPET0,
                   init_timer_oneshot_relative,

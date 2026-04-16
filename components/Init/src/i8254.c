@@ -95,10 +95,16 @@ typedef struct PITCommonState {
 } PITCommonState;
 
 static PITCommonState pit_state;
+static uint8_t speaker_port_state;
 
 extern vm_t vm;
 
 static void pit_irq_timer_update(PITChannelState *s, int64_t current_time);
+static unsigned pit_control_log_count;
+static unsigned pit_load_log_count;
+static unsigned pit_irq_log_count;
+static unsigned pit_timer_callback_log_count;
+static unsigned speaker_log_count;
 
 static uint64_t tsc_frequency = 0;
 
@@ -134,15 +140,22 @@ static int pit_get_count(PITChannelState *s)
 }
 
 /* val must be 0 or 1 */
-#if 0
-static void pit_set_channel_gate(PITCommonState *s, PITChannelState *sc,
+static void pit_set_channel_gate(PITCommonState *pit, PITChannelState *sc,
                                  int val)
 {
+    if (sc->gate == val) {
+        return;
+    }
     switch (sc->mode) {
     default:
     case 0:
     case 4:
-        /* XXX: just disable/enable counting */
+        if (!sc->gate && val) {
+            sc->count_load_time = current_time_ns();
+            if (sc == &pit->channels[0] && !sc->irq_disabled) {
+                pit_irq_timer_update(sc, sc->count_load_time);
+            }
+        }
         break;
     case 1:
     case 5:
@@ -164,7 +177,6 @@ static void pit_set_channel_gate(PITCommonState *s, PITChannelState *sc,
     }
     sc->gate = val;
 }
-#endif
 
 /* val must be 0 or 1 */
 #if 0
@@ -311,6 +323,10 @@ static inline void pit_load_count(PITChannelState *s, int val)
     if (val == 0) {
         val = 0x10000;
     }
+    if (pit_load_log_count < 16) {
+        ZF_LOGE("PIT load count=%d mode=%d rw=%d gate=%d", val, s->mode, s->rw_mode, s->gate);
+        pit_load_log_count++;
+    }
     s->count_load_time = current_time_ns()/*qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)*/;
     s->count = val;
     pit_irq_timer_update(s, s->count_load_time);
@@ -359,6 +375,11 @@ static void pit_ioport_write(void *opaque, uintptr_t addr,
         } else {
             s = &pit->channels[channel];
             access = (val >> 4) & 3;
+            if (pit_control_log_count < 16) {
+                ZF_LOGE("PIT control channel=%d access=%d mode=%d raw=0x%02lx",
+                        channel, access, (val >> 1) & 7, val);
+                pit_control_log_count++;
+            }
             if (access == 0) {
                 pit_latch_count(s);
             } else {
@@ -463,6 +484,11 @@ static void pit_irq_timer_update(PITChannelState *s, int64_t current_time)
     }
     expire_time = pit_get_next_transition_time(s, current_time);
     irq_level = pit_get_out(s, current_time);
+    if (pit_irq_log_count < 32) {
+        ZF_LOGE("PIT irq update level=%d next=%lld now=%lld count=%d mode=%d",
+                irq_level, (long long)expire_time, (long long)current_time, s->count, s->mode);
+        pit_irq_log_count++;
+    }
     //qemu_set_irq(s->irq, irq_level);
     vm_set_irq_level(vm.vcpus[BOOT_VCPU], TIMER_IRQ, irq_level);
 #ifdef DEBUG_PIT
@@ -485,6 +511,10 @@ static void pit_irq_timer(void *opaque)
 {
     PITChannelState *s = opaque;
 
+    if (pit_timer_callback_log_count < 32) {
+        ZF_LOGE("PIT timer callback next=%lld", (long long)s->next_transition_time);
+        pit_timer_callback_log_count++;
+    }
     pit_irq_timer_update(s, s->next_transition_time);
 }
 
@@ -610,9 +640,45 @@ void pit_timer_interrupt(void)
 void pit_pre_init(void)
 {
     tsc_frequency = init_timer_tsc_frequency();
+    speaker_port_state = 0;
     pit_state.channels[0].irq_timer = 1;
     pit_irq_control(&pit_state, 0, 1);
     pit_reset(&pit_state);
+}
+
+ioport_fault_result_t speaker_port_in(vm_vcpu_t *vcpu, void *cookie, unsigned int port_no, unsigned int size,
+                                      unsigned int *result)
+{
+    if (size != 1) {
+        LOG_ERROR("speaker port only supports reads of size 1");
+        return IO_FAULT_ERROR;
+    }
+    unsigned int value = speaker_port_state & 0x3;
+    value |= pit_get_out(&pit_state.channels[2], current_time_ns()) ? BIT(5) : 0;
+    *result = value;
+    if (speaker_log_count < 16) {
+        ZF_LOGE("speaker read value=0x%x gate=%d out=%d", value, pit_state.channels[2].gate,
+                pit_get_out(&pit_state.channels[2], current_time_ns()));
+        speaker_log_count++;
+    }
+    return IO_FAULT_HANDLED;
+}
+
+ioport_fault_result_t speaker_port_out(vm_vcpu_t *vcpu, void *cookie, unsigned int port_no, unsigned int size,
+                                       unsigned int value)
+{
+    if (size != 1) {
+        LOG_ERROR("speaker port only supports writes of size 1");
+        return IO_FAULT_ERROR;
+    }
+    speaker_port_state = value & 0xff;
+    pit_set_channel_gate(&pit_state, &pit_state.channels[2], !!(value & BIT(0)));
+    if (speaker_log_count < 16) {
+        ZF_LOGE("speaker write value=0x%x gate=%d mode=%d", value, !!(value & BIT(0)),
+                pit_state.channels[2].mode);
+        speaker_log_count++;
+    }
+    return IO_FAULT_HANDLED;
 }
 
 ioport_fault_result_t i8254_port_in(vm_vcpu_t *vcpu, void *cookie, unsigned int port_no, unsigned int size,
@@ -636,4 +702,3 @@ ioport_fault_result_t i8254_port_out(vm_vcpu_t *vcpu, void *cookie, unsigned int
     pit_ioport_write(&pit_state, port_no, value, 1);
     return IO_FAULT_HANDLED;
 }
-

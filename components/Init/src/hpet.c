@@ -67,7 +67,7 @@ typedef struct HPETTimer {  /* timers */
 } HPETTimer;
 
 typedef struct HPETState {
-    uint64_t hpet_offset;
+    int64_t hpet_offset;
     bool hpet_offset_saved;
     uint32_t flags;
     uint8_t rtc_irq_level;
@@ -88,6 +88,9 @@ typedef struct HPETState {
 } HPETState;
 
 static HPETState hpet_state;
+static unsigned hpet_cfg_log_count;
+static unsigned hpet_timer_log_count;
+static unsigned hpet_irq_log_count;
 
 extern vm_t vm;
 
@@ -167,7 +170,7 @@ static int deactivating_bit(uint64_t old, uint64_t new, uint64_t mask)
 
 static uint64_t hpet_get_ticks(HPETState *s)
 {
-    return ns_to_ticks(current_time_ns() + s->hpet_offset);
+    return ns_to_ticks((uint64_t)((int64_t)current_time_ns() + s->hpet_offset));
 }
 
 /*
@@ -210,6 +213,12 @@ static void update_irq(struct HPETTimer *timer, int set)
     }
     s = timer->state;
     mask = 1 << timer->tn;
+    if (hpet_irq_log_count < 32) {
+        ZF_LOGE("HPET irq timer=%u set=%d route=%d enabled=%d legacy=%d cfg=0x%llx",
+                timer->tn, set, route, timer_enabled(timer), hpet_in_legacy_mode(timer->state),
+                (unsigned long long)timer->config);
+        hpet_irq_log_count++;
+    }
     if (!set || !timer_enabled(timer) || !hpet_enabled(timer->state)) {
         s->isr &= ~mask;
         if (!timer_fsb_route(timer)) {
@@ -268,13 +277,8 @@ static int hpet_post_load(void *opaque, int version_id)
     /* Recalculate the offset between the main counter and guest time */
     if (!s->hpet_offset_saved) {
         uint64_t ticks = ticks_to_ns(s->hpet_counter);
-        uint64_t cur = current_time_ns();
-        if (cur > ticks) {
-            ZF_LOGD("Underflow");
-            s->hpet_offset = 0;
-        } else {
-            s->hpet_offset = ticks - cur;
-        }
+        int64_t cur = (int64_t)current_time_ns();
+        s->hpet_offset = (int64_t)ticks - cur;
     }
 
     /* Push number of timers into capability returned via HPET_ID */
@@ -313,6 +317,12 @@ static void hpet_timer(void *opaque)
 
     uint64_t period = t->period;
     uint64_t cur_tick = hpet_get_ticks(t->state);
+    if (hpet_timer_log_count < 32) {
+        ZF_LOGE("HPET timer fired tn=%u cfg=0x%llx cmp=0x%llx period=0x%llx cur=0x%llx",
+                t->tn, (unsigned long long)t->config, (unsigned long long)t->cmp,
+                (unsigned long long)t->period, (unsigned long long)cur_tick);
+        hpet_timer_log_count++;
+    }
 
     if (timer_is_periodic(t) && period != 0) {
         if (t->config & HPET_TN_32BIT) {
@@ -345,6 +355,13 @@ static void hpet_set_timer(HPETTimer *t)
     /* whenever new timer is being set up, make sure wrap_flag is 0 */
     t->wrap_flag = 0;
     diff = hpet_calculate_diff(t, cur_tick);
+    if (hpet_cfg_log_count < 32) {
+        ZF_LOGE("HPET set timer tn=%u cfg=0x%llx cmp=0x%llx period=0x%llx cur=0x%llx diff=0x%llx",
+                t->tn, (unsigned long long)t->config, (unsigned long long)t->cmp,
+                (unsigned long long)t->period, (unsigned long long)cur_tick,
+                (unsigned long long)diff);
+        hpet_cfg_log_count++;
+    }
 
     /* hpet spec says in one-shot 32-bit mode, generate an interrupt when
      * counter wraps in addition to an interrupt with comparator match.
@@ -480,6 +497,11 @@ static void vm_hpet_mmio_write(vm_vcpu_t *vcpu, void *opaque, uint32_t offset,
 
         switch ((addr - 0x100) % 0x20) {
         case HPET_TN_CFG:
+            if (hpet_cfg_log_count < 32) {
+                ZF_LOGE("HPET tn%u cfg write old=0x%lx new=0x%llx", timer_id, old_val,
+                        (unsigned long long)new_val);
+                hpet_cfg_log_count++;
+            }
             if (activating_bit(old_val, new_val, HPET_TN_FSB_ENABLE)) {
                 update_irq(timer, 0);
             }
@@ -500,6 +522,10 @@ static void vm_hpet_mmio_write(vm_vcpu_t *vcpu, void *opaque, uint32_t offset,
             ZF_LOGE("invalid HPET_TN_CFG+4 write");
             break;
         case HPET_TN_CMP: // comparator register
+            if (hpet_cfg_log_count < 32) {
+                ZF_LOGE("HPET tn%u cmp low write value=0x%llx", timer_id, (unsigned long long)new_val);
+                hpet_cfg_log_count++;
+            }
             if (timer->config & HPET_TN_32BIT) {
                 new_val = (uint32_t)new_val;
             }
@@ -522,6 +548,10 @@ static void vm_hpet_mmio_write(vm_vcpu_t *vcpu, void *opaque, uint32_t offset,
             }
             break;
         case HPET_TN_CMP + 4: // comparator register high order
+            if (hpet_cfg_log_count < 32) {
+                ZF_LOGE("HPET tn%u cmp high write value=0x%llx", timer_id, (unsigned long long)new_val);
+                hpet_cfg_log_count++;
+            }
             if (!timer_is_periodic(timer)
                 || (timer->config & HPET_TN_SETVAL)) {
                 timer->cmp = (timer->cmp & 0xffffffffULL) | new_val << 32;
@@ -555,18 +585,17 @@ static void vm_hpet_mmio_write(vm_vcpu_t *vcpu, void *opaque, uint32_t offset,
         case HPET_ID:
             return;
         case HPET_CFG:
+            if (hpet_cfg_log_count < 32) {
+                ZF_LOGE("HPET cfg write old=0x%lx new=0x%llx", old_val, (unsigned long long)new_val);
+                hpet_cfg_log_count++;
+            }
             val = hpet_fixup_reg(new_val, old_val, HPET_CFG_WRITE_MASK);
             s->config = (s->config & 0xffffffff00000000ULL) | val;
             if (activating_bit(old_val, new_val, HPET_CFG_ENABLE)) {
                 /* Enable main counter and interrupt generation. */
                 uint64_t ticks = ticks_to_ns(s->hpet_counter);
-                uint64_t cur = current_time_ns();
-                if (cur > ticks) {
-                    ZF_LOGD("Underflow");
-                    s->hpet_offset = 0;
-                } else {
-                    s->hpet_offset = ticks - cur;
-                }
+                int64_t cur = (int64_t)current_time_ns();
+                s->hpet_offset = (int64_t)ticks - cur;
                 for (i = 0; i < s->num_timers; i++) {
                     if ((&s->timer[i])->cmp != ~0ULL) {
                         hpet_set_timer(&s->timer[i]);
