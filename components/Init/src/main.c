@@ -236,9 +236,10 @@ static memory_range_t guest_ram_regions[] = {
     /* Allocate all the standard low memory areas */
     /* On x86 the BIOS loads the MBR to 0x7c00. But for this VMM,
      * we don't use MBR, so there is no need to exclude the MBR
-     * bootstrap code region */
-    {0x500, 0x80000 - 0x500},
-    {0x80000, 0x9fc00 - 0x80000},
+     * bootstrap code region. Keep the mapped regions page-aligned because
+     * guest RAM registration allocates and maps whole 4 KiB frames. */
+    {0x1000, 0x80000 - 0x1000},
+    {0x80000, 0x9f000 - 0x80000},
 };
 
 static memory_range_t guest_fake_devices[] = {
