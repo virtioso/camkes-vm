@@ -119,7 +119,10 @@ bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *
                 .base = 0xb0000000,
                 .size = 0x10000000,
             },
-            (vmm_pci_host_bridge_region_t) { 0, 0 },
+            (vmm_pci_host_bridge_region_t) {
+                .base = 0xc0000000,
+                .size = 0x3ec00000,
+            },
             (vmm_pci_host_bridge_region_t) { 0, 0 }
         );
         return true;
