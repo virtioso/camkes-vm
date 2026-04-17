@@ -143,6 +143,18 @@ bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *
     return false;
 }
 
+static bool physical_q35_pci_uses_structural_host_bridge(vm_t *vm)
+{
+    vmm_pci_host_bridge_t bridge;
+    vmm_pci_host_bridge_init_empty(&bridge);
+    if (!vmm_guest_detect_physical_pci_host_bridge(vm, &bridge)) {
+        return false;
+    }
+
+    return vmm_pci_host_bridge_region_valid(bridge.mcfg_region) &&
+           vmm_pci_host_bridge_region_valid(bridge.mem32_region);
+}
+
 static void reserve_physical_pci_host_apertures(vm_t *vm)
 {
     vmm_pci_host_bridge_t bridge;
@@ -819,6 +831,11 @@ static bool qemu_auto_passthrough_candidate(const libpci_device_t *device)
 
 static int auto_register_qemu_pci_passthrough(vm_t *vm)
 {
+    if (physical_q35_pci_uses_structural_host_bridge(vm)) {
+        ZF_LOGI("Skipping synthetic PCI insertion for q35 physical devices");
+        return 0;
+    }
+
     for (uint32_t pci_idx = 0; pci_idx < libpci_num_devices; pci_idx++) {
         libpci_device_t *device = &libpci_device_list[pci_idx];
         if (!qemu_auto_passthrough_candidate(device)) {
