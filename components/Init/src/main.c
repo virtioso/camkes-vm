@@ -99,6 +99,8 @@ static vmm_io_port_list_t *io_ports;
 
 vm_t vm;
 
+extern int camkes_get_untyped_page_bits(uintptr_t addr);
+
 bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *bridge)
 {
     (void)vm;
@@ -139,6 +141,46 @@ bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *
 #endif
 
     return false;
+}
+
+static void reserve_physical_pci_host_apertures(vm_t *vm)
+{
+    vmm_pci_host_bridge_t bridge;
+    vmm_pci_host_bridge_init_empty(&bridge);
+    if (!vmm_guest_detect_physical_pci_host_bridge(vm, &bridge)) {
+        return;
+    }
+
+    vmm_pci_host_bridge_region_t regions[] = {
+        bridge.mcfg_region,
+        bridge.mem32_region,
+    };
+    const char *region_names[] = {
+        "config",
+        "mem32",
+    };
+
+    for (size_t i = 0; i < ARRAY_SIZE(regions); i++) {
+        if (!vmm_pci_host_bridge_region_valid(regions[i])) {
+            continue;
+        }
+
+        int page_bits = camkes_get_untyped_page_bits(regions[i].base);
+        if (page_bits == 0) {
+            page_bits = seL4_PageBits;
+        }
+        size_t reserve_size = MIN(regions[i].size, BIT(page_bits));
+        vm_memory_reservation_t *reservation =
+            vm_reserve_memory_at(vm, regions[i].base, reserve_size,
+                                 default_error_fault_callback, NULL);
+        ZF_LOGF_IF(!reservation, "Failed to reserve PCI %s aperture at 0x%lx size 0x%zx",
+                   region_names[i], (unsigned long)regions[i].base, reserve_size);
+        int err = map_ut_alloc_reservation(vm, reservation);
+        ZF_LOGF_IF(err, "Failed to map PCI %s aperture at 0x%lx size 0x%zx",
+                   region_names[i], (unsigned long)regions[i].base, reserve_size);
+        ZF_LOGI("Reserved physical PCI %s aperture 0x%lx size 0x%zx",
+                region_names[i], (unsigned long)regions[i].base, reserve_size);
+    }
 }
 
 int camkes_cross_vm_connections_init(vm_t *vm, vmm_pci_space_t *pci,
@@ -1007,6 +1049,8 @@ void *main_continued(void *arg)
         error = map_frame_alloc_reservation(&vm, reservation);
         ZF_LOGF_IF(error, "Failed to map guest device reservation at %p", (void *)guest_fake_devices[i].base);
     }
+
+    reserve_physical_pci_host_apertures(&vm);
 
     /* Add in the device mappings specified by the guest. */
     for (i = 0; i < guest_mappings_num_guestmaps(); i++) {
