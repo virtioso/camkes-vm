@@ -87,6 +87,8 @@ void camkes_make_simple(simple_t *simple);
 static allocman_t *allocman;
 static char allocator_mempool[8886080];
 static simple_t camkes_simple;
+static seL4_Error (*camkes_original_frame_cap)(void *data, void *paddr, int size_bits,
+                                               cspacepath_t *path);
 static vka_t vka;
 static vspace_t vspace;
 static sel4utils_alloc_data_t vspace_data;
@@ -131,7 +133,10 @@ static seL4_Error simple_frame_cap_wrapper(void *data, void *paddr, int size_bit
         return 0;
     }
 
-    /* Else */
+    if (camkes_original_frame_cap) {
+        return camkes_original_frame_cap(data, paddr, size_bits, path);
+    }
+
     return -1;
 }
 
@@ -151,6 +156,7 @@ void pre_init(void)
     };
     camkes_make_simple(&camkes_simple);
     camkes_simple.arch_simple.IOPort_cap = simple_ioport_wrapper;
+    camkes_original_frame_cap = camkes_simple.frame_cap;
     camkes_simple.frame_cap = simple_frame_cap_wrapper;
 
     /* Initialize allocator */
