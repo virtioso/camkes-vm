@@ -230,6 +230,24 @@ static int register_physical_pci_device(vm_t *vm, libpci_device_t *device, int i
     });
 }
 
+static int register_q35_physical_host_bridge(vm_t *vm)
+{
+    libpci_device_t *host_bridge = libpci_find_device_bdf(0, 0, 0);
+    if (!host_bridge) {
+        ZF_LOGE("Failed to find q35 host bridge at 00:00.0");
+        return -1;
+    }
+
+    int error = register_physical_pci_device(vm, host_bridge, -1);
+    if (error) {
+        ZF_LOGE("Failed to mirror q35 host bridge 00:00.0");
+        return error;
+    }
+
+    ZF_LOGI("Mirrored q35 host bridge 00:00.0 via raw config");
+    return 0;
+}
+
 static void reserve_physical_pci_host_apertures(vm_t *vm)
 {
     vmm_pci_host_bridge_t bridge;
@@ -1169,9 +1187,18 @@ void *main_continued(void *arg)
         remaining -= allocate;
     }
 
-    error = vmm_pci_init(&pci, 0);
+    if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
+        error = vmm_pci_init_empty(&pci, 0);
+    } else {
+        error = vmm_pci_init(&pci, 0);
+    }
     if (error) {
         ZF_LOGF_IF(error, "Failed to initialise VMM PCI");
+    }
+
+    if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
+        error = register_q35_physical_host_bridge(&vm);
+        ZF_LOGF_IF(error, "Failed to register q35 physical host bridge");
     }
 
     /* Perform device discovery and give passthrough device information */
