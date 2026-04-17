@@ -573,6 +573,44 @@ static void irq_ack_hw_irq_handler(vm_vcpu_t *vcpu, int irq, void *cookie)
     assert(!error);
 }
 
+typedef struct runtime_irq_binding {
+    bool in_use;
+    uint8_t ioapic;
+    uint8_t source;
+    uint8_t dest;
+    seL4_CPtr irq_handler;
+} runtime_irq_binding_t;
+
+static runtime_irq_binding_t runtime_irq_bindings[PCI_MAX_DEVICES];
+static size_t runtime_irq_bindings_len;
+
+static int bind_vm_irq_handler(vm_t *vm, seL4_CPtr irq_handler, uint8_t dest)
+{
+    int error;
+    cspacepath_t badge_path;
+    cspacepath_t async_path;
+
+    if (dest >= ARRAY_SIZE(irq_badges)) {
+        ZF_LOGE("IRQ dest %u is out of supported badge range", dest);
+        return -1;
+    }
+
+    vka_cspace_make_path(&vka, intready_notification(), &async_path);
+    error = vka_cspace_alloc_path(&vka, &badge_path);
+    ZF_LOGF_IF(error, "Failed to alloc cspace path");
+
+    error = vka_cnode_mint(&badge_path, &async_path, seL4_AllRights, irq_badges[dest]);
+    ZF_LOGF_IF(error, "Failed to mint cnode");
+    error = seL4_IRQHandler_SetNotification(irq_handler, badge_path.capPtr);
+    ZF_LOGF_IF(error, "Failed to set notification for irq handler");
+    error = seL4_IRQHandler_Ack(irq_handler);
+    ZF_LOGF_IF(error, "Failed to ack irq handler");
+    error = vm_register_irq(vm->vcpus[BOOT_VCPU], dest, irq_ack_hw_irq_handler, (void *)irq_handler);
+    ZF_LOGF_IF(error, "Failed to register irq ack handler");
+
+    return 0;
+}
+
 static void init_irqs(vm_t *vm)
 {
     int error UNUSED;
@@ -590,22 +628,135 @@ static void init_irqs(vm_t *vm)
         int level_trig;
         int active_low;
         uint8_t dest;
-        cspacepath_t badge_path;
-        cspacepath_t async_path;
         irqs_get_irq(i, &irq_handler, &ioapic, &source, &level_trig, &active_low, &dest);
-        vka_cspace_make_path(&vka, intready_notification(), &async_path);
-        error = vka_cspace_alloc_path(&vka, &badge_path);
-        ZF_LOGF_IF(error, "Failed to alloc cspace path");
-
-        error = vka_cnode_mint(&badge_path, &async_path, seL4_AllRights, irq_badges[dest]);
-        ZF_LOGF_IF(error, "Failed to mint cnode");
-        error = seL4_IRQHandler_SetNotification(irq_handler, badge_path.capPtr);
-        ZF_LOGF_IF(error, "Failed to set notification for irq handler");
-        error = seL4_IRQHandler_Ack(irq_handler);
-        ZF_LOGF_IF(error, "Failed to ack irq handler");
-        error = vm_register_irq(vm->vcpus[BOOT_VCPU], dest, irq_ack_hw_irq_handler, (void *)irq_handler);
-        ZF_LOGF_IF(error, "Failed to register irq ack handler");
+        error = bind_vm_irq_handler(vm, irq_handler, dest);
+        ZF_LOGF_IF(error, "Failed to bind vm irq handler");
     }
+}
+
+static bool pci_device_is_configured(uint8_t bus, uint8_t dev, uint8_t fun)
+{
+    for (int i = 0; i < pci_devices_num_devices(); i++) {
+        uint8_t cfg_bus;
+        uint8_t cfg_dev;
+        uint8_t cfg_fun;
+        seL4_CPtr iospace_cap UNUSED;
+        pci_devices_get_device(i, &cfg_bus, &cfg_dev, &cfg_fun, &iospace_cap);
+        if (cfg_bus == bus && cfg_dev == dev && cfg_fun == fun) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int ensure_runtime_ioapic_irq(vm_t *vm, uint8_t ioapic, uint8_t source,
+                                     int level_trig, int active_low, uint8_t dest)
+{
+    for (size_t i = 0; i < runtime_irq_bindings_len; i++) {
+        runtime_irq_binding_t *binding = &runtime_irq_bindings[i];
+        if (binding->in_use && binding->ioapic == ioapic &&
+            binding->source == source && binding->dest == dest) {
+            return 0;
+        }
+    }
+
+    if (runtime_irq_bindings_len >= ARRAY_SIZE(runtime_irq_bindings)) {
+        ZF_LOGE("Out of runtime IRQ binding slots");
+        return -1;
+    }
+
+    cspacepath_t irq_path;
+    int error = vka_cspace_alloc_path(&vka, &irq_path);
+    if (error) {
+        ZF_LOGE("Failed to alloc cspace path for runtime IOAPIC irq");
+        return error;
+    }
+
+    error = arch_simple_get_ioapic(&camkes_simple.arch_simple, irq_path, ioapic, source,
+                                   level_trig, active_low, dest);
+    if (error) {
+        ZF_LOGE("Failed to allocate runtime IOAPIC irq ioapic=%u pin=%u dest=%u", ioapic, source, dest);
+        vka_cspace_free_path(&vka, irq_path);
+        return error;
+    }
+
+    error = bind_vm_irq_handler(vm, irq_path.capPtr, dest);
+    if (error) {
+        ZF_LOGE("Failed to bind runtime IOAPIC irq ioapic=%u pin=%u dest=%u", ioapic, source, dest);
+        return error;
+    }
+
+    runtime_irq_bindings[runtime_irq_bindings_len++] = (runtime_irq_binding_t) {
+        .in_use = true,
+        .ioapic = ioapic,
+        .source = source,
+        .dest = dest,
+        .irq_handler = irq_path.capPtr,
+    };
+
+    return 0;
+}
+
+static bool qemu_auto_passthrough_candidate(const libpci_device_t *device)
+{
+#ifdef CONFIG_PLAT_QEMU_PC99
+    return device->vendor_id == 0x1af4;
+#else
+    return false;
+#endif
+}
+
+static int auto_register_qemu_pci_passthrough(vm_t *vm)
+{
+    for (uint32_t pci_idx = 0; pci_idx < libpci_num_devices; pci_idx++) {
+        libpci_device_t *device = &libpci_device_list[pci_idx];
+        if (!qemu_auto_passthrough_candidate(device)) {
+            continue;
+        }
+        if (pci_device_is_configured(device->bus, device->dev, device->fun)) {
+            continue;
+        }
+        if (device->interrupt_pin == 0 || device->interrupt_line == 0xff) {
+            ZF_LOGE("Skipping auto passthrough for %02x:%02x.%u without usable INTx",
+                    device->bus, device->dev, device->fun);
+            continue;
+        }
+
+        uint8_t dest = device->interrupt_line;
+        int error = ensure_runtime_ioapic_irq(vm, 0, device->interrupt_line, 1, 1, dest);
+        if (error) {
+            return error;
+        }
+
+        vmm_pci_bar_t bars[6];
+        int num_bars = vmm_pci_helper_map_bars(vm, &device->cfg, bars);
+        if (num_bars < 0) {
+            ZF_LOGE("Failed to map BARs for auto passthrough device %02x:%02x.%u",
+                    device->bus, device->dev, device->fun);
+            return num_bars;
+        }
+
+        vmm_pci_entry_t entry = vmm_pci_create_passthrough((vmm_pci_address_t) {
+            device->bus, device->dev, device->fun
+        }, make_camkes_pci_config());
+        if (num_bars > 0) {
+            entry = vmm_pci_create_bar_emulation(entry, num_bars, bars);
+        }
+        entry = vmm_pci_create_irq_emulation(entry, dest);
+        entry = vmm_pci_no_msi_cap_emulation(entry);
+        error = vmm_pci_add_entry(pci, entry, NULL);
+        if (error) {
+            ZF_LOGE("Failed to add auto passthrough device %02x:%02x.%u",
+                    device->bus, device->dev, device->fun);
+            return error;
+        }
+
+        ZF_LOGE("Auto passthrough PCI device bdf=%02x:%02x.%u vid=%04x did=%04x irq=%u",
+                device->bus, device->dev, device->fun,
+                device->vendor_id, device->device_id, dest);
+    }
+
+    return 0;
 }
 
 
@@ -885,6 +1036,9 @@ void *main_continued(void *arg)
         error = vmm_pci_add_entry(pci, entry, NULL);
         assert(!error);
     }
+
+    error = auto_register_qemu_pci_passthrough(&vm);
+    ZF_LOGF_IF(error, "Failed to auto-register qemu pci passthrough devices");
 
     /* Initialize any extra init devices */
     ZF_LOGI("Init extra devices");
