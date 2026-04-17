@@ -155,6 +155,81 @@ static bool physical_q35_pci_uses_structural_host_bridge(vm_t *vm)
            vmm_pci_host_bridge_region_valid(bridge.mem32_region);
 }
 
+static bool physical_q35_pci_uses_raw_config_mirror(vm_t *vm)
+{
+    return physical_q35_pci_uses_structural_host_bridge(vm);
+}
+
+static vmm_pci_config_t make_camkes_pci_config(void);
+
+static int reserve_structural_physical_pci_bars(vm_t *vm, libpci_device_t *device)
+{
+    for (int i = 0; i < 6; i++) {
+        if (device->cfg.base_addr[i] == 0) {
+            continue;
+        }
+
+        size_t size = device->cfg.base_addr_size[i];
+        ZF_LOGF_IF(size == 0, "Physical PCI BAR %02x:%02x.%u[%d] has zero size",
+                   device->bus, device->dev, device->fun, i);
+
+        if (device->cfg.base_addr_space[i] == PCI_BASE_ADDRESS_SPACE_MEMORY) {
+            vm_memory_reservation_t *reservation =
+                vm_reserve_memory_at(vm, (uintptr_t)device->cfg.base_addr[i], size,
+                                     default_error_fault_callback, NULL);
+            ZF_LOGF_IF(!reservation,
+                       "Failed to reserve physical PCI BAR %02x:%02x.%u[%d] at 0x%x size 0x%zx",
+                       device->bus, device->dev, device->fun, i, device->cfg.base_addr[i], size);
+
+            int err = map_ut_alloc_reservation_with_base_paddr(vm,
+                                                               (uintptr_t)device->cfg.base_addr[i],
+                                                               reservation);
+            ZF_LOGF_IF(err,
+                       "Failed to map physical PCI BAR %02x:%02x.%u[%d] at 0x%x size 0x%zx",
+                       device->bus, device->dev, device->fun, i, device->cfg.base_addr[i], size);
+        } else {
+            int err = vm_enable_passthrough_ioport(vm->vcpus[BOOT_VCPU], device->cfg.base_addr[i],
+                                                   device->cfg.base_addr[i] + size - 1);
+            ZF_LOGF_IF(err, "Failed to enable physical PCI I/O BAR %02x:%02x.%u[%d]",
+                       device->bus, device->dev, device->fun, i);
+        }
+    }
+
+    return 0;
+}
+
+static int register_physical_pci_device(vm_t *vm, libpci_device_t *device, int irq)
+{
+    bool structural_q35 = physical_q35_pci_uses_raw_config_mirror(vm);
+    vmm_pci_entry_t entry = vmm_pci_create_passthrough((vmm_pci_address_t) {
+        device->bus, device->dev, device->fun
+    }, make_camkes_pci_config());
+
+    if (structural_q35) {
+        int err = reserve_structural_physical_pci_bars(vm, device);
+        if (err) {
+            return err;
+        }
+    } else {
+        vmm_pci_bar_t bars[6];
+        int num_bars = vmm_pci_helper_map_bars(vm, &device->cfg, bars);
+        if (num_bars < 0) {
+            ZF_LOGE("Failed to map BARs for passthrough device %02x:%02x.%u",
+                    device->bus, device->dev, device->fun);
+            return num_bars;
+        }
+        if (num_bars > 0) {
+            entry = vmm_pci_create_bar_emulation(entry, num_bars, bars);
+        }
+        entry = vmm_pci_create_irq_emulation(entry, irq);
+        entry = vmm_pci_no_msi_cap_emulation(entry);
+    }
+
+    return vmm_pci_add_entry_at(pci, entry, (vmm_pci_address_t) {
+        .bus = device->bus, .dev = device->dev, .fun = device->fun
+    });
+}
+
 static void reserve_physical_pci_host_apertures(vm_t *vm)
 {
     vmm_pci_host_bridge_t bridge;
@@ -831,11 +906,6 @@ static bool qemu_auto_passthrough_candidate(const libpci_device_t *device)
 
 static int auto_register_qemu_pci_passthrough(vm_t *vm)
 {
-    if (physical_q35_pci_uses_structural_host_bridge(vm)) {
-        ZF_LOGI("Skipping synthetic PCI insertion for q35 physical devices");
-        return 0;
-    }
-
     for (uint32_t pci_idx = 0; pci_idx < libpci_num_devices; pci_idx++) {
         libpci_device_t *device = &libpci_device_list[pci_idx];
         if (!qemu_auto_passthrough_candidate(device)) {
@@ -856,32 +926,17 @@ static int auto_register_qemu_pci_passthrough(vm_t *vm)
             return error;
         }
 
-        vmm_pci_bar_t bars[6];
-        int num_bars = vmm_pci_helper_map_bars(vm, &device->cfg, bars);
-        if (num_bars < 0) {
-            ZF_LOGE("Failed to map BARs for auto passthrough device %02x:%02x.%u",
-                    device->bus, device->dev, device->fun);
-            return num_bars;
-        }
-
-        vmm_pci_entry_t entry = vmm_pci_create_passthrough((vmm_pci_address_t) {
-            device->bus, device->dev, device->fun
-        }, make_camkes_pci_config());
-        if (num_bars > 0) {
-            entry = vmm_pci_create_bar_emulation(entry, num_bars, bars);
-        }
-        entry = vmm_pci_create_irq_emulation(entry, dest);
-        entry = vmm_pci_no_msi_cap_emulation(entry);
-        error = vmm_pci_add_entry(pci, entry, NULL);
+        error = register_physical_pci_device(vm, device, dest);
         if (error) {
             ZF_LOGE("Failed to add auto passthrough device %02x:%02x.%u",
                     device->bus, device->dev, device->fun);
             return error;
         }
 
-        ZF_LOGE("Auto passthrough PCI device bdf=%02x:%02x.%u vid=%04x did=%04x irq=%u",
+        ZF_LOGE("Auto passthrough PCI device bdf=%02x:%02x.%u vid=%04x did=%04x irq=%u mode=%s",
                 device->bus, device->dev, device->fun,
-                device->vendor_id, device->device_id, dest);
+                device->vendor_id, device->device_id, dest,
+                physical_q35_pci_uses_raw_config_mirror(vm) ? "raw-config" : "synthetic");
     }
 
     return 0;
@@ -1151,19 +1206,7 @@ void *main_continued(void *arg)
             LOG_ERROR("Failed to find device %02x:%02x.%d\n", bus, dev, fun);
             return NULL;
         }
-        /* Allocate resources */
-        vmm_pci_bar_t bars[6];
-        int num_bars = vmm_pci_helper_map_bars(&vm, &device->cfg, bars);
-        assert(num_bars >= 0);
-        vmm_pci_entry_t entry = vmm_pci_create_passthrough((vmm_pci_address_t) {
-            bus, dev, fun
-        }, make_camkes_pci_config());
-        if (num_bars > 0) {
-            entry = vmm_pci_create_bar_emulation(entry, num_bars, bars);
-        }
-        entry = vmm_pci_create_irq_emulation(entry, irq);
-        entry = vmm_pci_no_msi_cap_emulation(entry);
-        error = vmm_pci_add_entry(pci, entry, NULL);
+        error = register_physical_pci_device(&vm, device, irq);
         assert(!error);
     }
 
