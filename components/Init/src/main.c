@@ -964,7 +964,7 @@ void *main_continued(void *arg)
         uint64_t frame_paddr;
         uint64_t size;
         error = guest_mappings_get_guest_map(i, &frame_paddr, &size);
-        ZF_LOGF_IF(error, "Failed to get guest map at %d\n", i);
+        ZF_LOGF_IF(!error, "Failed to get guest map at %d\n", i);
     }
 
     // Remove any guest physical addresses that are defined as unavailable
