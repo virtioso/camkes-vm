@@ -652,6 +652,19 @@ static bool pci_device_is_configured(uint8_t bus, uint8_t dev, uint8_t fun)
 static int ensure_runtime_ioapic_irq(vm_t *vm, uint8_t ioapic, uint8_t source,
                                      int level_trig, int active_low, uint8_t dest)
 {
+    for (int i = 0; i < irqs_num_irqs(); i++) {
+        seL4_CPtr irq_handler UNUSED;
+        uint8_t cfg_ioapic;
+        uint8_t cfg_source;
+        int cfg_level_trig;
+        int cfg_active_low;
+        uint8_t cfg_dest;
+        irqs_get_irq(i, &irq_handler, &cfg_ioapic, &cfg_source, &cfg_level_trig, &cfg_active_low, &cfg_dest);
+        if (cfg_ioapic == ioapic && cfg_source == source && cfg_dest == dest) {
+            return 0;
+        }
+    }
+
     for (size_t i = 0; i < runtime_irq_bindings_len; i++) {
         runtime_irq_binding_t *binding = &runtime_irq_bindings[i];
         if (binding->in_use && binding->ioapic == ioapic &&
@@ -672,10 +685,17 @@ static int ensure_runtime_ioapic_irq(vm_t *vm, uint8_t ioapic, uint8_t source,
         return error;
     }
 
-    error = arch_simple_get_ioapic(&camkes_simple.arch_simple, irq_path, ioapic, source,
-                                   level_trig, active_low, dest);
+    if (camkes_simple.arch_simple.ioapic) {
+        error = arch_simple_get_ioapic(&camkes_simple.arch_simple, irq_path, ioapic, source,
+                                       level_trig, active_low, dest);
+    } else {
+        error = simple_get_IRQ_handler(&camkes_simple, source, irq_path);
+        if (!error) {
+            ZF_LOGE("Falling back to legacy IRQ handler for runtime PCI irq source=%u dest=%u", source, dest);
+        }
+    }
     if (error) {
-        ZF_LOGE("Failed to allocate runtime IOAPIC irq ioapic=%u pin=%u dest=%u", ioapic, source, dest);
+        ZF_LOGE("Failed to allocate runtime IRQ ioapic=%u pin=%u source=%u dest=%u", ioapic, source, source, dest);
         vka_cspace_free_path(&vka, irq_path);
         return error;
     }
@@ -699,7 +719,7 @@ static int ensure_runtime_ioapic_irq(vm_t *vm, uint8_t ioapic, uint8_t source,
 
 static bool qemu_auto_passthrough_candidate(const libpci_device_t *device)
 {
-#ifdef CONFIG_PLAT_QEMU_PC99
+#ifdef CONFIG_PLAT_PC99
     return device->vendor_id == 0x1af4;
 #else
     return false;
