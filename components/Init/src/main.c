@@ -38,6 +38,7 @@
 #include <sel4vmmplatsupport/gen_config.h>
 #include <sel4vmmplatsupport/guest_memory_util.h>
 #include <sel4vmmplatsupport/ioports.h>
+#include <sel4vmmplatsupport/pci_host_bridge.h>
 #include <sel4vmmplatsupport/drivers/pci.h>
 #include <sel4vmmplatsupport/drivers/pci_helper.h>
 #include <sel4vmmplatsupport/drivers/cross_vm_connection.h>
@@ -97,6 +98,45 @@ static vmm_pci_space_t *pci;
 static vmm_io_port_list_t *io_ports;
 
 vm_t vm;
+
+bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *bridge)
+{
+    (void)vm;
+    if (!bridge) {
+        return false;
+    }
+
+#ifdef CONFIG_PLAT_PC99
+    libpci_device_t *host_bridge = libpci_find_device_bdf(0, 0, 0);
+    if (!host_bridge) {
+        return false;
+    }
+
+    if (host_bridge->vendor_id == 0x8086 && host_bridge->device_id == 0x29c0) {
+        vmm_pci_host_bridge_init_qemu_pc_q35(
+            bridge,
+            (vmm_pci_host_bridge_region_t) {
+                .base = 0xb0000000,
+                .size = 0x10000000,
+            },
+            (vmm_pci_host_bridge_region_t) { 0, 0 },
+            (vmm_pci_host_bridge_region_t) { 0, 0 }
+        );
+        return true;
+    }
+
+    if (host_bridge->vendor_id == 0x8086 && host_bridge->device_id == 0x1237) {
+        vmm_pci_host_bridge_init_qemu_pc_i440fx(
+            bridge,
+            (vmm_pci_host_bridge_region_t) { 0, 0 },
+            (vmm_pci_host_bridge_region_t) { 0, 0 }
+        );
+        return true;
+    }
+#endif
+
+    return false;
+}
 
 int camkes_cross_vm_connections_init(vm_t *vm, vmm_pci_space_t *pci,
                                      seL4_CPtr irq_notification, uintptr_t connection_base_address) WEAK;
