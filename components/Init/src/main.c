@@ -21,6 +21,7 @@
 #include <simple/simple_helpers.h>
 #include <utils/util.h>
 #include <vka/capops.h>
+#include <pci/pci.h>
 
 #include <camkes.h>
 
@@ -668,6 +669,34 @@ void *main_continued(void *arg)
     if (pci_devices_num_devices() > 0) {
         ZF_LOGI("PCI scan");
         libpci_scan(pci_io_ops);
+        for (uint32_t pci_idx = 0; pci_idx < libpci_num_devices; pci_idx++) {
+            libpci_device_t *device = &libpci_device_list[pci_idx];
+            ZF_LOGE(
+                "PCI device idx=%u bdf=%02x:%02x.%u vid=%04x did=%04x line=%u pin=%u",
+                pci_idx,
+                device->bus,
+                device->dev,
+                device->fun,
+                device->vendor_id,
+                device->device_id,
+                device->interrupt_line,
+                device->interrupt_pin
+            );
+            for (int bar_idx = 0; bar_idx < 6; bar_idx++) {
+                if (!device->cfg.base_addr_size[bar_idx]) {
+                    continue;
+                }
+                ZF_LOGE(
+                    "PCI BAR idx=%u bar=%d addr=0x%lx size=0x%lx io=%u type=%u",
+                    pci_idx,
+                    bar_idx,
+                    (unsigned long)device->cfg.base_addr[bar_idx],
+                    (unsigned long)device->cfg.base_addr_size[bar_idx],
+                    (unsigned int)(device->cfg.base_addr_space[bar_idx] == PCI_BASE_ADDRESS_SPACE_IO),
+                    (unsigned int)device->cfg.base_addr_type[bar_idx]
+                );
+            }
+        }
     }
 
     /* install custom open/close/read implementations to redirect I/O from the VMM to
