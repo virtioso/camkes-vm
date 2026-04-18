@@ -95,6 +95,7 @@ static vspace_t vspace;
 static sel4utils_alloc_data_t vspace_data;
 struct ps_io_ops io_ops;
 static vmm_pci_space_t *pci;
+static vmm_pci_raw_io_space_t *physical_pci_raw_io;
 static vmm_io_port_list_t *io_ports;
 
 vm_t vm;
@@ -1226,9 +1227,9 @@ void *main_continued(void *arg)
     }
 
     if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
-        vmm_pci_set_raw_config_fallback(pci, make_camkes_pci_config());
-        vmm_pci_set_raw_config_primary(pci, true);
-        vmm_pci_set_raw_config_owns_bus0(pci, true);
+        physical_pci_raw_io = calloc(1, sizeof(*physical_pci_raw_io));
+        ZF_LOGF_IF(!physical_pci_raw_io, "Failed to allocate physical pci raw io state");
+        vmm_pci_raw_io_space_init(physical_pci_raw_io, make_camkes_pci_config());
     }
 
     if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
@@ -1312,7 +1313,7 @@ void *main_continued(void *arg)
     vm_ioport_range_t pci_config_range = {X86_IO_PCI_CONFIG_START, X86_IO_PCI_CONFIG_END};
     vm_ioport_interface_t pci_config_interface = physical_q35_pci_uses_structural_host_bridge(&vm) ?
                                                  (vm_ioport_interface_t) {
-                                                     pci, vmm_pci_raw_bus0_io_port_in, vmm_pci_raw_bus0_io_port_out,
+                                                     physical_pci_raw_io, vmm_pci_raw_bus0_io_port_in, vmm_pci_raw_bus0_io_port_out,
                                                      "PCI Configuration Space"
                                                  } :
                                                  (vm_ioport_interface_t) {
