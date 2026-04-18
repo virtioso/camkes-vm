@@ -56,6 +56,7 @@ function(DeclareCAmkESVM init_component)
         seL4VMIOPorts.template.c
         seL4GuestMaps.template.c
         seL4PhysicalPCIHostBridge.template.c
+        seL4PhysicalPCIIospaces.template.c
         seL4PhysicalPCIIrqs.template.c
         seL4VMIRQs.template.c
         seL4VMPCIDevices.template.c

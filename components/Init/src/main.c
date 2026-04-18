@@ -1117,6 +1117,17 @@ void *main_continued(void *arg)
         error = vm_guest_add_iospace(&vm, &vm.mem.vmm_vspace, iospace_cap);
         ZF_LOGF_IF(error, "failed to add iospace to vspace");
     }
+
+    for (i = 0; i < physical_pci_iospaces_num_devices(); i++) {
+        uint8_t bus;
+        uint8_t dev;
+        uint8_t fun;
+        seL4_CPtr iospace_cap;
+        error = physical_pci_iospaces_get_device(i, &bus, &dev, &fun, &iospace_cap);
+        ZF_LOGF_IF(error, "failed to get physical pci iospace");
+        error = vm_guest_add_iospace(&vm, &vm.mem.vmm_vspace, iospace_cap);
+        ZF_LOGF_IF(error, "failed to add physical pci iospace to vspace");
+    }
 #endif
 
     vm_vcpu_t *vm_vcpu;
