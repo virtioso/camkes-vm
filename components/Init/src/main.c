@@ -1230,46 +1230,46 @@ void *main_continued(void *arg)
         vmm_pci_set_raw_config_primary(pci, true);
     }
 
-    /* Perform device discovery and give passthrough device information */
-    ZF_LOGI("PCI device discovery");
-    for (i = 0; i < pci_devices_num_devices(); i++) {
-        uint8_t bus;
-        uint8_t dev;
-        uint8_t fun;
-        const char *irq_name;
-        int irq = -1;
-        seL4_CPtr iospace_cap;
-        pci_devices_get_device(i, &bus, &dev, &fun, &iospace_cap);
-        irq_name = pci_devices_get_device_irq(i);
-        /* search for the irq */
-        for (int j = 0; j < irqs_num_irqs(); j++) {
-            seL4_CPtr cap;
-            uint8_t ioapic;
-            uint8_t source;
-            int level_trig;
-            int active_low;
-            uint8_t dest;
-            const char *this_name;
-            this_name = irqs_get_irq(j, &cap, &ioapic, &source, &level_trig, &active_low, &dest);
-            if (strcmp(irq_name, this_name) == 0) {
-                irq = dest;
-                break;
-            }
-        }
-        assert(irq != -1);
-        libpci_device_t *device = libpci_find_device_bdf(bus, dev, fun);
-        if (!device) {
-            LOG_ERROR("Failed to find device %02x:%02x.%d\n", bus, dev, fun);
-            return NULL;
-        }
-        error = register_physical_pci_device(&vm, device, irq);
-        assert(!error);
-    }
-
     if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
         error = auto_bind_qemu_pci_irqs(&vm);
         ZF_LOGF_IF(error, "Failed to bind qemu pci irqs");
     } else {
+        /* Perform device discovery and give passthrough device information */
+        ZF_LOGI("PCI device discovery");
+        for (i = 0; i < pci_devices_num_devices(); i++) {
+            uint8_t bus;
+            uint8_t dev;
+            uint8_t fun;
+            const char *irq_name;
+            int irq = -1;
+            seL4_CPtr iospace_cap;
+            pci_devices_get_device(i, &bus, &dev, &fun, &iospace_cap);
+            irq_name = pci_devices_get_device_irq(i);
+            /* search for the irq */
+            for (int j = 0; j < irqs_num_irqs(); j++) {
+                seL4_CPtr cap;
+                uint8_t ioapic;
+                uint8_t source;
+                int level_trig;
+                int active_low;
+                uint8_t dest;
+                const char *this_name;
+                this_name = irqs_get_irq(j, &cap, &ioapic, &source, &level_trig, &active_low, &dest);
+                if (strcmp(irq_name, this_name) == 0) {
+                    irq = dest;
+                    break;
+                }
+            }
+            assert(irq != -1);
+            libpci_device_t *device = libpci_find_device_bdf(bus, dev, fun);
+            if (!device) {
+                LOG_ERROR("Failed to find device %02x:%02x.%d\n", bus, dev, fun);
+                return NULL;
+            }
+            error = register_physical_pci_device(&vm, device, irq);
+            assert(!error);
+        }
+
         error = auto_register_qemu_pci_passthrough(&vm);
         ZF_LOGF_IF(error, "Failed to auto-register qemu pci passthrough devices");
     }
