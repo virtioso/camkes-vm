@@ -972,24 +972,24 @@ static int auto_register_qemu_pci_passthrough(vm_t *vm)
     return 0;
 }
 
-static int auto_bind_qemu_pci_irqs(vm_t *vm)
+static int bind_generated_physical_pci_irqs(vm_t *vm)
 {
-    for (uint32_t pci_idx = 0; pci_idx < libpci_num_devices; pci_idx++) {
-        libpci_device_t *device = &libpci_device_list[pci_idx];
-        if (!qemu_auto_passthrough_candidate(device)) {
-            continue;
-        }
-        if (device->interrupt_pin == 0 || device->interrupt_line == 0xff) {
-            ZF_LOGE("Skipping runtime IRQ bind for %02x:%02x.%u without usable INTx",
-                    device->bus, device->dev, device->fun);
+    for (int i = 0; i < physical_pci_irqs_num_irqs(); i++) {
+        seL4_CPtr irq_handler;
+        uint8_t ioapic;
+        uint8_t source;
+        int level_trig;
+        int active_low;
+        uint8_t dest;
+        if (physical_pci_irqs_get_irq(i, &irq_handler, &ioapic, &source,
+                                      &level_trig, &active_low, &dest) != 0) {
             continue;
         }
 
-        uint8_t dest = device->interrupt_line;
-        int error = ensure_runtime_ioapic_irq(vm, 0, device->interrupt_line, 1, 1, dest);
+        int error = ensure_runtime_ioapic_irq(vm, ioapic, source, level_trig, active_low, dest);
         if (error) {
-            ZF_LOGE("Failed to add runtime IRQ for auto passthrough device %02x:%02x.%u",
-                    device->bus, device->dev, device->fun);
+            ZF_LOGE("Failed to bind generated physical PCI irq ioapic=%u pin=%u dest=%u",
+                    ioapic, source, dest);
             return error;
         }
     }
@@ -1242,8 +1242,8 @@ void *main_continued(void *arg)
     }
 
     if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
-        error = auto_bind_qemu_pci_irqs(&vm);
-        ZF_LOGF_IF(error, "Failed to bind qemu pci irqs");
+        error = bind_generated_physical_pci_irqs(&vm);
+        ZF_LOGF_IF(error, "Failed to bind generated physical pci irqs");
     } else {
         /* Perform device discovery and give passthrough device information */
         ZF_LOGI("PCI device discovery");
