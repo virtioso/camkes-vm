@@ -250,6 +250,30 @@ static int register_q35_physical_host_bridge(vm_t *vm)
 
 static void reserve_physical_pci_host_apertures(vm_t *vm)
 {
+    int generated_regions = physical_pci_host_bridge_num_regions();
+    if (generated_regions > 0) {
+        for (int i = 0; i < generated_regions; i++) {
+            uintptr_t base;
+            size_t size;
+            int page_bits;
+            int err = physical_pci_host_bridge_get_region(i, &base, &size, &page_bits);
+            ZF_LOGF_IF(err, "Failed to get generated physical PCI host bridge region %d", i);
+
+            vm_memory_reservation_t *reservation =
+                vm_reserve_memory_at(vm, base, size, default_error_fault_callback, NULL);
+            ZF_LOGF_IF(!reservation,
+                       "Failed to reserve generated physical PCI host bridge region at 0x%lx size 0x%zx",
+                       (unsigned long)base, size);
+            err = map_ut_alloc_reservation_with_base_paddr(vm, base, reservation);
+            ZF_LOGF_IF(err,
+                       "Failed to map generated physical PCI host bridge region at 0x%lx size 0x%zx",
+                       (unsigned long)base, size);
+            ZF_LOGI("Reserved generated physical PCI host bridge region 0x%lx size 0x%zx page_bits=%d",
+                    (unsigned long)base, size, page_bits);
+        }
+        return;
+    }
+
     vmm_pci_host_bridge_t bridge;
     vmm_pci_host_bridge_init_empty(&bridge);
     if (!vmm_guest_detect_physical_pci_host_bridge(vm, &bridge)) {
@@ -310,6 +334,12 @@ static seL4_Error simple_ioport_wrapper(void *data, uint16_t start_port, uint16_
 static seL4_Error simple_frame_cap_wrapper(void *data, void *paddr, int size_bits, cspacepath_t *path)
 {
     seL4_CPtr cap = pci_devices_get_device_mem_frame((uintptr_t)paddr);
+    if (cap != 0) {
+        vka_cspace_make_path(&vka, cap, path);
+        return 0;
+    }
+
+    cap = physical_pci_host_bridge_get_mem_frame((uintptr_t)paddr);
     if (cap != 0) {
         vka_cspace_make_path(&vka, cap, path);
         return 0;

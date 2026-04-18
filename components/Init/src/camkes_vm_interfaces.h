@@ -39,6 +39,10 @@ int guest_mappings_num_guestmaps();
 int guest_mappings_get_guest_map(int num, uint64_t *frame, uint64_t *size);
 seL4_CPtr guest_mappings_get_mapping_mem_frame(uintptr_t paddr);
 
+int physical_pci_host_bridge_num_regions(void);
+int physical_pci_host_bridge_get_region(int num, uintptr_t *paddr, size_t *bytes, int *page_bits);
+seL4_CPtr physical_pci_host_bridge_get_mem_frame(uintptr_t paddr);
+
 int irqs_num_irqs();
 const char *irqs_get_irq(int irq, seL4_CPtr *irq_handler, uint8_t *ioapic, uint8_t *source, int *level_trig,
                          int *active_low, uint8_t *dest);
