@@ -158,11 +158,6 @@ static bool physical_q35_pci_uses_structural_host_bridge(vm_t *vm)
            vmm_pci_host_bridge_region_valid(bridge.mem32_region);
 }
 
-static bool physical_q35_pci_uses_raw_config_mirror(vm_t *vm)
-{
-    return physical_q35_pci_uses_structural_host_bridge(vm);
-}
-
 static bool physical_q35_needs_synthetic_pci_space(vm_t *vm)
 {
     if (!physical_q35_pci_uses_structural_host_bridge(vm)) {
@@ -184,25 +179,22 @@ static vmm_pci_config_t make_camkes_pci_config(void);
 
 static int register_physical_pci_device(vm_t *vm, libpci_device_t *device, int irq)
 {
-    bool structural_q35 = physical_q35_pci_uses_raw_config_mirror(vm);
     vmm_pci_entry_t entry = vmm_pci_create_passthrough((vmm_pci_address_t) {
         device->bus, device->dev, device->fun
     }, make_camkes_pci_config());
 
-    if (!structural_q35) {
-        vmm_pci_bar_t bars[6];
-        int num_bars = vmm_pci_helper_map_bars(vm, &device->cfg, bars);
-        if (num_bars < 0) {
-            ZF_LOGE("Failed to map BARs for passthrough device %02x:%02x.%u",
-                    device->bus, device->dev, device->fun);
-            return num_bars;
-        }
-        if (num_bars > 0) {
-            entry = vmm_pci_create_bar_emulation(entry, num_bars, bars);
-        }
-        entry = vmm_pci_create_irq_emulation(entry, irq);
-        entry = vmm_pci_no_msi_cap_emulation(entry);
+    vmm_pci_bar_t bars[6];
+    int num_bars = vmm_pci_helper_map_bars(vm, &device->cfg, bars);
+    if (num_bars < 0) {
+        ZF_LOGE("Failed to map BARs for passthrough device %02x:%02x.%u",
+                device->bus, device->dev, device->fun);
+        return num_bars;
     }
+    if (num_bars > 0) {
+        entry = vmm_pci_create_bar_emulation(entry, num_bars, bars);
+    }
+    entry = vmm_pci_create_irq_emulation(entry, irq);
+    entry = vmm_pci_no_msi_cap_emulation(entry);
 
     return vmm_pci_add_entry_at(pci, entry, (vmm_pci_address_t) {
         .bus = device->bus, .dev = device->dev, .fun = device->fun
@@ -974,8 +966,7 @@ static int auto_register_qemu_pci_passthrough(vm_t *vm)
 
         ZF_LOGE("Auto passthrough PCI device bdf=%02x:%02x.%u vid=%04x did=%04x irq=%u mode=%s",
                 device->bus, device->dev, device->fun,
-                device->vendor_id, device->device_id, dest,
-                physical_q35_pci_uses_raw_config_mirror(vm) ? "raw-config" : "synthetic");
+                device->vendor_id, device->device_id, dest, "synthetic");
     }
 
     return 0;
