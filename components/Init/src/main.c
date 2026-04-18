@@ -662,6 +662,7 @@ extern seL4_Word init_timer_notification_badge(void);
 extern seL4_Word serial_getchar_notification_badge(void);
 static unsigned timer_badge_log_count;
 static unsigned host_irq_log_count;
+static unsigned host_irq_ack_log_count;
 
 static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo_t tag, void *cookie)
 {
@@ -745,6 +746,10 @@ static seL4_CPtr create_async_event_notification_cap(vm_t *vm, seL4_Word badge)
 static void irq_ack_hw_irq_handler(vm_vcpu_t *vcpu, int irq, void *cookie)
 {
     seL4_CPtr handler = (seL4_CPtr) cookie;
+    if (host_irq_ack_log_count < 32) {
+        ZF_LOGE("IRQ ack handler irq=%d cap=%lu", irq, (unsigned long)handler);
+        host_irq_ack_log_count++;
+    }
     int UNUSED error = seL4_IRQHandler_Ack(handler);
     assert(!error);
 }
