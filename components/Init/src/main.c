@@ -1227,6 +1227,7 @@ void *main_continued(void *arg)
 
     if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
         vmm_pci_set_raw_config_fallback(pci, make_camkes_pci_config());
+        vmm_pci_set_raw_config_primary(pci, true);
     }
 
     /* Perform device discovery and give passthrough device information */
