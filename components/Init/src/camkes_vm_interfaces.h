@@ -41,6 +41,7 @@ seL4_CPtr guest_mappings_get_mapping_mem_frame(uintptr_t paddr);
 
 int physical_pci_host_bridge_num_regions(void);
 int physical_pci_host_bridge_get_region(int num, uintptr_t *paddr, size_t *bytes, int *page_bits);
+int physical_pci_host_bridge_get_page_bits(uintptr_t paddr);
 seL4_CPtr physical_pci_host_bridge_get_mem_frame(uintptr_t paddr);
 
 int irqs_num_irqs();

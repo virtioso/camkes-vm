@@ -65,6 +65,21 @@ int physical_pci_host_bridge_get_region(int num, uintptr_t *base, size_t *size, 
     /*- endif -*/
 }
 
+int physical_pci_host_bridge_get_page_bits(uintptr_t paddr)
+{
+    /*- if len(regions) == 0 -*/
+        return 0;
+    /*- else -*/
+            /*- for paddr, size, page_bits in regions -*/
+                if (paddr >= /*? paddr ?*/ &&
+                    paddr < /*? paddr ?*/ + /*? size ?*/) {
+                    return /*? page_bits ?*/;
+                }
+            /*- endfor -*/
+            return 0;
+    /*- endif -*/
+}
+
 seL4_CPtr physical_pci_host_bridge_get_mem_frame(uintptr_t paddr)
 {
     /*- if len(frames) == 0 -*/
