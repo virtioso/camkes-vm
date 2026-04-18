@@ -101,6 +101,8 @@ static vmm_io_port_list_t *io_ports;
 vm_t vm;
 
 extern int camkes_get_untyped_page_bits(uintptr_t addr);
+int camkes_cross_vm_connections_init(vm_t *vm, vmm_pci_space_t *pci,
+                                     seL4_CPtr irq_notification, uintptr_t connection_base_address) WEAK;
 
 bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *bridge)
 {
@@ -159,6 +161,23 @@ static bool physical_q35_pci_uses_structural_host_bridge(vm_t *vm)
 static bool physical_q35_pci_uses_raw_config_mirror(vm_t *vm)
 {
     return physical_q35_pci_uses_structural_host_bridge(vm);
+}
+
+static bool physical_q35_needs_synthetic_pci_space(vm_t *vm)
+{
+    if (!physical_q35_pci_uses_structural_host_bridge(vm)) {
+        return true;
+    }
+
+    if (init_cons_num_connections() > 0) {
+        return true;
+    }
+
+    if (camkes_cross_vm_connections_init) {
+        return true;
+    }
+
+    return false;
 }
 
 static vmm_pci_config_t make_camkes_pci_config(void);
@@ -253,9 +272,6 @@ static void reserve_physical_pci_host_apertures(vm_t *vm)
                 region_names[i], (unsigned long)regions[i].base, reserve_size);
     }
 }
-
-int camkes_cross_vm_connections_init(vm_t *vm, vmm_pci_space_t *pci,
-                                     seL4_CPtr irq_notification, uintptr_t connection_base_address) WEAK;
 
 int get_crossvm_irq_num(void)
 {
@@ -1217,12 +1233,14 @@ void *main_continued(void *arg)
         remaining -= allocate;
     }
 
-    if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
+    if (!physical_q35_needs_synthetic_pci_space(&vm)) {
+        pci = NULL;
+    } else if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
         error = vmm_pci_init_empty(&pci, 0);
     } else {
         error = vmm_pci_init(&pci, 0);
     }
-    if (error) {
+    if (physical_q35_needs_synthetic_pci_space(&vm) && error) {
         ZF_LOGF_IF(error, "Failed to initialise VMM PCI");
     }
 
