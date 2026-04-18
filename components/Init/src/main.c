@@ -840,6 +840,39 @@ static int ensure_runtime_ioapic_irq(vm_t *vm, uint8_t ioapic, uint8_t source,
         }
     }
 
+    for (int i = 0; i < physical_pci_irqs_num_irqs(); i++) {
+        seL4_CPtr irq_handler;
+        uint8_t cfg_ioapic;
+        uint8_t cfg_source;
+        int cfg_level_trig;
+        int cfg_active_low;
+        uint8_t cfg_dest;
+        if (physical_pci_irqs_get_irq(i, &irq_handler, &cfg_ioapic, &cfg_source,
+                                      &cfg_level_trig, &cfg_active_low, &cfg_dest) != 0) {
+            continue;
+        }
+        if (cfg_ioapic == ioapic && cfg_source == source && cfg_dest == dest) {
+            if (runtime_irq_bindings_len >= ARRAY_SIZE(runtime_irq_bindings)) {
+                ZF_LOGE("Out of runtime IRQ binding slots");
+                return -1;
+            }
+            int error = bind_vm_irq_handler(vm, irq_handler, dest);
+            if (error) {
+                ZF_LOGE("Failed to bind generated physical PCI irq ioapic=%u pin=%u dest=%u",
+                        ioapic, source, dest);
+                return error;
+            }
+            runtime_irq_bindings[runtime_irq_bindings_len++] = (runtime_irq_binding_t) {
+                .in_use = true,
+                .ioapic = ioapic,
+                .source = source,
+                .dest = dest,
+                .irq_handler = irq_handler,
+            };
+            return 0;
+        }
+    }
+
     if (runtime_irq_bindings_len >= ARRAY_SIZE(runtime_irq_bindings)) {
         ZF_LOGE("Out of runtime IRQ binding slots");
         return -1;
@@ -926,6 +959,31 @@ static int auto_register_qemu_pci_passthrough(vm_t *vm)
                 device->bus, device->dev, device->fun,
                 device->vendor_id, device->device_id, dest,
                 physical_q35_pci_uses_raw_config_mirror(vm) ? "raw-config" : "synthetic");
+    }
+
+    return 0;
+}
+
+static int auto_bind_qemu_pci_irqs(vm_t *vm)
+{
+    for (uint32_t pci_idx = 0; pci_idx < libpci_num_devices; pci_idx++) {
+        libpci_device_t *device = &libpci_device_list[pci_idx];
+        if (!qemu_auto_passthrough_candidate(device)) {
+            continue;
+        }
+        if (device->interrupt_pin == 0 || device->interrupt_line == 0xff) {
+            ZF_LOGE("Skipping runtime IRQ bind for %02x:%02x.%u without usable INTx",
+                    device->bus, device->dev, device->fun);
+            continue;
+        }
+
+        uint8_t dest = device->interrupt_line;
+        int error = ensure_runtime_ioapic_irq(vm, 0, device->interrupt_line, 1, 1, dest);
+        if (error) {
+            ZF_LOGE("Failed to add runtime IRQ for auto passthrough device %02x:%02x.%u",
+                    device->bus, device->dev, device->fun);
+            return error;
+        }
     }
 
     return 0;
@@ -1207,7 +1265,10 @@ void *main_continued(void *arg)
         assert(!error);
     }
 
-    if (!physical_q35_pci_uses_structural_host_bridge(&vm)) {
+    if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
+        error = auto_bind_qemu_pci_irqs(&vm);
+        ZF_LOGF_IF(error, "Failed to bind qemu pci irqs");
+    } else {
         error = auto_register_qemu_pci_passthrough(&vm);
         ZF_LOGF_IF(error, "Failed to auto-register qemu pci passthrough devices");
     }

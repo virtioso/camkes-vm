@@ -44,6 +44,10 @@ int physical_pci_host_bridge_get_region(int num, uintptr_t *paddr, size_t *bytes
 int physical_pci_host_bridge_get_page_bits(uintptr_t paddr);
 seL4_CPtr physical_pci_host_bridge_get_mem_frame(uintptr_t paddr);
 
+int physical_pci_irqs_num_irqs(void);
+int physical_pci_irqs_get_irq(int irq, seL4_CPtr *irq_handler, uint8_t *ioapic, uint8_t *source,
+                              int *level_trig, int *active_low, uint8_t *dest);
+
 int irqs_num_irqs();
 const char *irqs_get_irq(int irq, seL4_CPtr *irq_handler, uint8_t *ioapic, uint8_t *source, int *level_trig,
                          int *active_low, uint8_t *dest);
