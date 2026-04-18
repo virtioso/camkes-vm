@@ -1310,7 +1310,15 @@ void *main_continued(void *arg)
     }
     /* config start and end encomposes both addr and data ports */
     vm_ioport_range_t pci_config_range = {X86_IO_PCI_CONFIG_START, X86_IO_PCI_CONFIG_END};
-    vm_ioport_interface_t pci_config_interface = {pci, vmm_pci_io_port_in, vmm_pci_io_port_out, "PCI Configuration Space"};
+    vm_ioport_interface_t pci_config_interface = physical_q35_pci_uses_structural_host_bridge(&vm) ?
+                                                 (vm_ioport_interface_t) {
+                                                     pci, vmm_pci_raw_bus0_io_port_in, vmm_pci_raw_bus0_io_port_out,
+                                                     "PCI Configuration Space"
+                                                 } :
+                                                 (vm_ioport_interface_t) {
+                                                     pci, vmm_pci_io_port_in, vmm_pci_io_port_out,
+                                                     "PCI Configuration Space"
+                                                 };
     error = vm_io_port_add_handler(&vm, pci_config_range, pci_config_interface);
     assert(!error);
 
