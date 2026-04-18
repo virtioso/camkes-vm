@@ -34,8 +34,8 @@
 /*- endmacro -*/
 
 /*- if host_bridge == 'qemu_pc_q35' -*/
-    /*? add_region(0xb0000000, 0x200000, 21) ?*/
-    /*? add_region(0xc0000000, 0x200000, 21) ?*/
+    /*? add_region(0xb0000000, 0x10000000, 21) ?*/
+    /*? add_region(0xc0000000, 0x3ec00000, 21) ?*/
 /*- elif host_bridge == 'qemu_arm_virt' -*/
     /*? add_region(0x3f000000, 0x1000000, 21) ?*/
     /*? add_region(0x10000000, 0x2eff0000, 21) ?*/
@@ -70,13 +70,12 @@ seL4_CPtr physical_pci_host_bridge_get_mem_frame(uintptr_t paddr)
     /*- if len(frames) == 0 -*/
         return 0;
     /*- else -*/
-        switch (paddr) {
             /*- for paddr, cap in frames -*/
-                case /*? paddr ?*/:
+                if (paddr >= /*? paddr ?*/ &&
+                    paddr < /*? paddr ?*/ + BIT(21)) {
                     return /*? cap ?*/;
+                }
             /*- endfor -*/
-            default:
-                return 0;
-        }
+            return 0;
     /*- endif -*/
 }
