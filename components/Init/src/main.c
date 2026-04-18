@@ -162,42 +162,6 @@ static bool physical_q35_pci_uses_raw_config_mirror(vm_t *vm)
 
 static vmm_pci_config_t make_camkes_pci_config(void);
 
-static int reserve_structural_physical_pci_bars(vm_t *vm, libpci_device_t *device)
-{
-    for (int i = 0; i < 6; i++) {
-        if (device->cfg.base_addr[i] == 0) {
-            continue;
-        }
-
-        size_t size = device->cfg.base_addr_size[i];
-        ZF_LOGF_IF(size == 0, "Physical PCI BAR %02x:%02x.%u[%d] has zero size",
-                   device->bus, device->dev, device->fun, i);
-
-        if (device->cfg.base_addr_space[i] == PCI_BASE_ADDRESS_SPACE_MEMORY) {
-            vm_memory_reservation_t *reservation =
-                vm_reserve_memory_at(vm, (uintptr_t)device->cfg.base_addr[i], size,
-                                     default_error_fault_callback, NULL);
-            ZF_LOGF_IF(!reservation,
-                       "Failed to reserve physical PCI BAR %02x:%02x.%u[%d] at 0x%x size 0x%zx",
-                       device->bus, device->dev, device->fun, i, device->cfg.base_addr[i], size);
-
-            int err = map_ut_alloc_reservation_with_base_paddr(vm,
-                                                               (uintptr_t)device->cfg.base_addr[i],
-                                                               reservation);
-            ZF_LOGF_IF(err,
-                       "Failed to map physical PCI BAR %02x:%02x.%u[%d] at 0x%x size 0x%zx",
-                       device->bus, device->dev, device->fun, i, device->cfg.base_addr[i], size);
-        } else {
-            int err = vm_enable_passthrough_ioport(vm->vcpus[BOOT_VCPU], device->cfg.base_addr[i],
-                                                   device->cfg.base_addr[i] + size - 1);
-            ZF_LOGF_IF(err, "Failed to enable physical PCI I/O BAR %02x:%02x.%u[%d]",
-                       device->bus, device->dev, device->fun, i);
-        }
-    }
-
-    return 0;
-}
-
 static int register_physical_pci_device(vm_t *vm, libpci_device_t *device, int irq)
 {
     bool structural_q35 = physical_q35_pci_uses_raw_config_mirror(vm);
@@ -205,12 +169,7 @@ static int register_physical_pci_device(vm_t *vm, libpci_device_t *device, int i
         device->bus, device->dev, device->fun
     }, make_camkes_pci_config());
 
-    if (structural_q35) {
-        int err = reserve_structural_physical_pci_bars(vm, device);
-        if (err) {
-            return err;
-        }
-    } else {
+    if (!structural_q35) {
         vmm_pci_bar_t bars[6];
         int num_bars = vmm_pci_helper_map_bars(vm, &device->cfg, bars);
         if (num_bars < 0) {
