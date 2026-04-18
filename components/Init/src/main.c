@@ -189,24 +189,6 @@ static int register_physical_pci_device(vm_t *vm, libpci_device_t *device, int i
     });
 }
 
-static int register_q35_physical_host_bridge(vm_t *vm)
-{
-    libpci_device_t *host_bridge = libpci_find_device_bdf(0, 0, 0);
-    if (!host_bridge) {
-        ZF_LOGE("Failed to find q35 host bridge at 00:00.0");
-        return -1;
-    }
-
-    int error = register_physical_pci_device(vm, host_bridge, -1);
-    if (error) {
-        ZF_LOGE("Failed to mirror q35 host bridge 00:00.0");
-        return error;
-    }
-
-    ZF_LOGI("Mirrored q35 host bridge 00:00.0 via raw config");
-    return 0;
-}
-
 static void reserve_physical_pci_host_apertures(vm_t *vm)
 {
     int generated_regions = physical_pci_host_bridge_num_regions();
@@ -1186,8 +1168,7 @@ void *main_continued(void *arg)
     }
 
     if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
-        error = register_q35_physical_host_bridge(&vm);
-        ZF_LOGF_IF(error, "Failed to register q35 physical host bridge");
+        vmm_pci_set_raw_config_fallback(pci, make_camkes_pci_config());
     }
 
     /* Perform device discovery and give passthrough device information */
@@ -1226,8 +1207,10 @@ void *main_continued(void *arg)
         assert(!error);
     }
 
-    error = auto_register_qemu_pci_passthrough(&vm);
-    ZF_LOGF_IF(error, "Failed to auto-register qemu pci passthrough devices");
+    if (!physical_q35_pci_uses_structural_host_bridge(&vm)) {
+        error = auto_register_qemu_pci_passthrough(&vm);
+        ZF_LOGF_IF(error, "Failed to auto-register qemu pci passthrough devices");
+    }
 
     /* Initialize any extra init devices */
     ZF_LOGI("Init extra devices");
