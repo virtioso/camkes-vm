@@ -59,10 +59,12 @@ typedef struct HPETTimer {  /* timers */
     uint64_t cmp;           /* comparator */
     uint64_t fsb;           /* FSB route */
     /* Hidden register state */
+    uint64_t cmp64;         /* comparator widened to counter width */
     uint64_t period;        /* Last value written to comparator */
     uint8_t wrap_flag;      /* timer pop will indicate wrap for one-shot 32-bit
                              * mode. Next pop will be actual timer expiration.
                              */
+    uint64_t last;          /* last armed time, to avoid timer storms */
     int tid;
 } HPETTimer;
 
@@ -131,11 +133,6 @@ static uint32_t timer_enabled(HPETTimer *t)
     return t->config & HPET_TN_ENABLE;
 }
 
-static uint32_t hpet_time_after(uint64_t a, uint64_t b)
-{
-    return ((int32_t)(b - a) < 0);
-}
-
 static uint32_t hpet_time_after64(uint64_t a, uint64_t b)
 {
     return ((int64_t)(b - a) < 0);
@@ -173,27 +170,45 @@ static uint64_t hpet_get_ticks(HPETState *s)
     return ns_to_ticks((uint64_t)((int64_t)current_time_ns() + s->hpet_offset));
 }
 
-/*
- * calculate diff between comparator value and current ticks
- */
-static inline uint64_t hpet_calculate_diff(HPETTimer *t, uint64_t current)
+static uint64_t hpet_get_ns(HPETState *s, uint64_t tick)
 {
+    return ticks_to_ns(tick) - s->hpet_offset;
+}
 
+/*
+ * calculate next counter value matching the programmed comparator.
+ */
+static uint64_t hpet_calculate_cmp64(HPETTimer *t, uint64_t cur_tick, uint64_t target)
+{
     if (t->config & HPET_TN_32BIT) {
-        uint32_t diff, cmp;
-
-        cmp = (uint32_t)t->cmp;
-        diff = cmp - (uint32_t)current;
-        diff = (int32_t)diff > 0 ? diff : (uint32_t)1;
-        return (uint64_t)diff;
-    } else {
-        uint64_t diff, cmp;
-
-        cmp = t->cmp;
-        diff = cmp - current;
-        diff = (int64_t)diff > 0 ? diff : (uint64_t)1;
-        return diff;
+        uint64_t result = (cur_tick & ~0xffffffffULL) | (target & 0xffffffffULL);
+        if (result < cur_tick) {
+            result += 0x100000000ULL;
+        }
+        return result;
     }
+
+    return target;
+}
+
+static uint64_t hpet_next_wrap(uint64_t cur_tick)
+{
+    return (cur_tick | 0xffffffffU) + 1;
+}
+
+static void hpet_arm(HPETTimer *t, uint64_t tick)
+{
+    uint64_t target_ns = hpet_get_ns(t->state, tick);
+    uint64_t now = current_time_ns();
+    uint64_t delay;
+
+    if (timer_is_periodic(t) && target_ns - t->last < 1000) {
+        target_ns = t->last + 1000;
+    }
+
+    t->last = target_ns;
+    delay = target_ns > now ? target_ns - now : ticks_to_ns(1);
+    t->state->timer_oneshot_callback(t->tid, delay);
 }
 
 static void update_irq(struct HPETTimer *timer, int set)
@@ -273,12 +288,19 @@ static bool hpet_validate_num_timers(void *opaque, int version_id)
 static int hpet_post_load(void *opaque, int version_id)
 {
     HPETState *s = opaque;
+    int i;
 
     /* Recalculate the offset between the main counter and guest time */
     if (!s->hpet_offset_saved) {
         uint64_t ticks = ticks_to_ns(s->hpet_counter);
         int64_t cur = (int64_t)current_time_ns();
         s->hpet_offset = (int64_t)ticks - cur;
+    }
+
+    for (i = 0; i < s->num_timers; i++) {
+        HPETTimer *t = &s->timer[i];
+        t->cmp64 = hpet_calculate_cmp64(t, s->hpet_counter, t->cmp);
+        t->last = current_time_ns() - NS_IN_S;
     }
 
     /* Push number of timers into capability returned via HPET_ID */
@@ -313,34 +335,30 @@ static bool hpet_rtc_irq_level_needed(void *opaque)
 static void hpet_timer(void *opaque)
 {
     HPETTimer *t = opaque;
-    uint64_t diff;
-
     uint64_t period = t->period;
     uint64_t cur_tick = hpet_get_ticks(t->state);
     if (hpet_timer_log_count < 32) {
-        ZF_LOGE("HPET timer fired tn=%u cfg=0x%llx cmp=0x%llx period=0x%llx cur=0x%llx",
+        ZF_LOGE("HPET timer fired tn=%u cfg=0x%llx cmp=0x%llx cmp64=0x%llx period=0x%llx cur=0x%llx",
                 t->tn, (unsigned long long)t->config, (unsigned long long)t->cmp,
+                (unsigned long long)t->cmp64,
                 (unsigned long long)t->period, (unsigned long long)cur_tick);
         hpet_timer_log_count++;
     }
 
     if (timer_is_periodic(t) && period != 0) {
-        if (t->config & HPET_TN_32BIT) {
-            while (hpet_time_after(cur_tick, t->cmp)) {
-                t->cmp = (uint32_t)(t->cmp + t->period);
-            }
-        } else {
-            while (hpet_time_after64(cur_tick, t->cmp)) {
-                t->cmp += period;
-            }
+        while (hpet_time_after64(cur_tick, t->cmp64)) {
+            t->cmp64 += period;
         }
-        diff = hpet_calculate_diff(t, cur_tick);
-        t->state->timer_oneshot_callback(t->tid, (int64_t)ticks_to_ns(diff));
+        if (t->config & HPET_TN_32BIT) {
+            t->cmp = (uint32_t)t->cmp64;
+        } else {
+            t->cmp = t->cmp64;
+        }
+        hpet_arm(t, t->cmp64);
     } else if (t->config & HPET_TN_32BIT && !timer_is_periodic(t)) {
         if (t->wrap_flag) {
-            diff = hpet_calculate_diff(t, cur_tick);
-            t->state->timer_oneshot_callback(t->tid, (int64_t)ticks_to_ns(diff));
             t->wrap_flag = 0;
+            hpet_arm(t, t->cmp64);
         }
     }
     update_irq(t, 1);
@@ -348,32 +366,28 @@ static void hpet_timer(void *opaque)
 
 static void hpet_set_timer(HPETTimer *t)
 {
-    uint64_t diff;
-    uint32_t wrap_diff;  /* how many ticks until we wrap? */
     uint64_t cur_tick = hpet_get_ticks(t->state);
 
     /* whenever new timer is being set up, make sure wrap_flag is 0 */
     t->wrap_flag = 0;
-    diff = hpet_calculate_diff(t, cur_tick);
+    t->cmp64 = hpet_calculate_cmp64(t, cur_tick, t->cmp);
     if (hpet_cfg_log_count < 32) {
-        ZF_LOGE("HPET set timer tn=%u cfg=0x%llx cmp=0x%llx period=0x%llx cur=0x%llx diff=0x%llx",
+        ZF_LOGE("HPET set timer tn=%u cfg=0x%llx cmp=0x%llx cmp64=0x%llx period=0x%llx cur=0x%llx",
                 t->tn, (unsigned long long)t->config, (unsigned long long)t->cmp,
-                (unsigned long long)t->period, (unsigned long long)cur_tick,
-                (unsigned long long)diff);
+                (unsigned long long)t->cmp64, (unsigned long long)t->period,
+                (unsigned long long)cur_tick);
         hpet_cfg_log_count++;
     }
 
-    /* hpet spec says in one-shot 32-bit mode, generate an interrupt when
-     * counter wraps in addition to an interrupt with comparator match.
-     */
-    if (t->config & HPET_TN_32BIT && !timer_is_periodic(t)) {
-        wrap_diff = 0xffffffff - (uint32_t)cur_tick;
-        if (wrap_diff < (uint32_t)diff) {
-            diff = wrap_diff;
+    if (t->config & HPET_TN_32BIT) {
+        /* In one-shot 32-bit mode, the wrap interrupt precedes the match. */
+        if (!timer_is_periodic(t) && t->cmp64 > hpet_next_wrap(cur_tick)) {
             t->wrap_flag = 1;
+            hpet_arm(t, hpet_next_wrap(cur_tick));
+            return;
         }
     }
-    t->state->timer_oneshot_callback(t->tid, (int64_t)ticks_to_ns(diff));
+    hpet_arm(t, t->cmp64);
 }
 
 static void hpet_del_timer(HPETTimer *t)
@@ -668,6 +682,7 @@ static void hpet_reset(HPETState *s)
         HPETTimer *timer = &s->timer[i];
         hpet_del_timer(timer);
         timer->cmp = ~0ULL;
+        timer->cmp64 = ~0ULL;
         timer->config = HPET_TN_PERIODIC_CAP | HPET_TN_SIZE_CAP;
         if (s->flags & (1 << HPET_MSI_SUPPORT)) {
             timer->config |= HPET_TN_FSB_CAP;
@@ -676,6 +691,7 @@ static void hpet_reset(HPETState *s)
         timer->config |= (uint64_t)s->intcap << 32;
         timer->period = 0ULL;
         timer->wrap_flag = 0;
+        timer->last = 0;
     }
 
     s->hpet_counter = 0ULL;
