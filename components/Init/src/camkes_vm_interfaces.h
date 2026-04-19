@@ -44,6 +44,11 @@ int physical_pci_host_bridge_get_region(int num, uintptr_t *paddr, size_t *bytes
 int physical_pci_host_bridge_get_page_bits(uintptr_t paddr);
 seL4_CPtr physical_pci_host_bridge_get_mem_frame(uintptr_t paddr);
 
+int physical_pci_devices_num_devices(void);
+int physical_pci_devices_get_device(int num, uint8_t *bus, uint8_t *dev, uint8_t *fun, int *owner);
+int physical_pci_devices_get_owner(uint8_t bus, uint8_t dev, uint8_t fun);
+int physical_pci_devices_guest_visible(uint8_t bus, uint8_t dev, uint8_t fun);
+
 int physical_pci_iospaces_num_devices(void);
 int physical_pci_iospaces_get_device(int num, uint8_t *bus, uint8_t *dev, uint8_t *fun, seL4_CPtr *iospace_cap);
 

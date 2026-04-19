@@ -439,29 +439,65 @@ typedef struct device_notify {
     void (*func)(vm_t *vm);
 } device_notify_t;
 
+#define PHYSICAL_PCI_DEVICE_OWNER_NONE   0
+#define PHYSICAL_PCI_DEVICE_OWNER_GUEST  1
+#define PHYSICAL_PCI_DEVICE_OWNER_NATIVE 2
+
+static bool physical_pci_device_guest_visible(uint8_t bus, uint8_t dev, uint8_t fun)
+{
+    if (physical_pci_devices_num_devices() == 0) {
+        return true;
+    }
+
+    int owner = physical_pci_devices_get_owner(bus, dev, fun);
+    if (owner == PHYSICAL_PCI_DEVICE_OWNER_NONE) {
+        return true;
+    }
+
+    return owner == PHYSICAL_PCI_DEVICE_OWNER_GUEST;
+}
+
 /* Wrappers for passing PCI config space calls to camkes */
 static uint8_t camkes_pci_read8(void *cookie, vmm_pci_address_t addr, unsigned int offset)
 {
+    if (!physical_pci_device_guest_visible(addr.bus, addr.dev, addr.fun)) {
+        return UINT8_MAX;
+    }
     return pci_config_read8(addr.bus, addr.dev, addr.fun, offset);
 }
 static uint16_t camkes_pci_read16(void *cookie, vmm_pci_address_t addr, unsigned int offset)
 {
+    if (!physical_pci_device_guest_visible(addr.bus, addr.dev, addr.fun)) {
+        return UINT16_MAX;
+    }
     return pci_config_read16(addr.bus, addr.dev, addr.fun, offset);
 }
 static uint32_t camkes_pci_read32(void *cookie, vmm_pci_address_t addr, unsigned int offset)
 {
+    if (!physical_pci_device_guest_visible(addr.bus, addr.dev, addr.fun)) {
+        return UINT32_MAX;
+    }
     return pci_config_read32(addr.bus, addr.dev, addr.fun, offset);
 }
 static void camkes_pci_write8(void *cookie, vmm_pci_address_t addr, unsigned int offset, uint8_t val)
 {
+    if (!physical_pci_device_guest_visible(addr.bus, addr.dev, addr.fun)) {
+        return;
+    }
     pci_config_write8(addr.bus, addr.dev, addr.fun, offset, val);
 }
 static void camkes_pci_write16(void *cookie, vmm_pci_address_t addr, unsigned int offset, uint16_t val)
 {
+    if (!physical_pci_device_guest_visible(addr.bus, addr.dev, addr.fun)) {
+        return;
+    }
     pci_config_write16(addr.bus, addr.dev, addr.fun, offset, val);
 }
 static void camkes_pci_write32(void *cookie, vmm_pci_address_t addr, unsigned int offset, uint32_t val)
 {
+    if (!physical_pci_device_guest_visible(addr.bus, addr.dev, addr.fun)) {
+        return;
+    }
     pci_config_write32(addr.bus, addr.dev, addr.fun, offset, val);
 }
 

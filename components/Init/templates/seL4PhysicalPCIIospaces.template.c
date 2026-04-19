@@ -15,6 +15,7 @@
     /*- set host_bridge = host_bridge.strip('"') -*/
 /*- endif -*/
 /*- set iospace_domain = configuration[me.name].get('iospace_domain') -*/
+/*- set config_devices = configuration[me.name].get("physical_pci_devices") -*/
 /*- set devices = [] -*/
 
 /*- macro add_iospace(bus, dev, fun) -*/
@@ -30,7 +31,14 @@
  * 00:01.0 virtio-net-pci
  * 00:02.0 virtio-blk-pci
  */
-/*- if host_bridge == 'qemu_pc_q35' and iospace_domain is not none -*/
+/*- if config_devices is not none and iospace_domain is not none -*/
+    /*- for device in config_devices -*/
+        /*- set owner_name = device.get('owner', '"guest"').strip('"') -*/
+        /*- if owner_name == 'guest' and device.get('iospace', True) -*/
+            /*? add_iospace(device['bus'], device['dev'], device['fun']) ?*/
+        /*- endif -*/
+    /*- endfor -*/
+/*- elif host_bridge == 'qemu_pc_q35' and iospace_domain is not none -*/
     /*? add_iospace(0x00, 0x01, 0x0) ?*/
     /*? add_iospace(0x00, 0x02, 0x0) ?*/
 /*- endif -*/
