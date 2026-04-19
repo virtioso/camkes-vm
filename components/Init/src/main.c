@@ -788,19 +788,12 @@ void serial_character_interrupt(void);
  */
 extern seL4_Word init_timer_notification_badge(void);
 extern seL4_Word serial_getchar_notification_badge(void);
-static unsigned timer_badge_log_count;
-static unsigned host_irq_log_count;
-static unsigned host_irq_ack_log_count;
 
 static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo_t tag, void *cookie)
 {
     if (badge & BIT(27)) {
         if ((badge & init_timer_notification_badge()) == init_timer_notification_badge()) {
             uint32_t completed = init_timer_completed();
-            if (timer_badge_log_count < 32) {
-                ZF_LOGE("Init timer badge completed=0x%x", completed);
-                timer_badge_log_count++;
-            }
             if (completed & BIT(TIMER_PIT)) {
                 pit_timer_interrupt();
             }
@@ -823,10 +816,6 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
         }
         for (size_t i = 0; i < ARRAY_SIZE(irq_badges); i++) {
             if ((badge & irq_badges[i]) == irq_badges[i]) {
-                if (host_irq_log_count < 32) {
-                    ZF_LOGE("External IRQ badge irq=%zu", i);
-                    host_irq_log_count++;
-                }
                 vm_inject_irq(vm->vcpus[BOOT_VCPU], i);
             }
         }
@@ -874,10 +863,6 @@ static seL4_CPtr create_async_event_notification_cap(vm_t *vm, seL4_Word badge)
 static void irq_ack_hw_irq_handler(vm_vcpu_t *vcpu, int irq, void *cookie)
 {
     seL4_CPtr handler = (seL4_CPtr) cookie;
-    if (host_irq_ack_log_count < 32) {
-        ZF_LOGE("IRQ ack handler irq=%d cap=%lu", irq, (unsigned long)handler);
-        host_irq_ack_log_count++;
-    }
     int UNUSED error = seL4_IRQHandler_Ack(handler);
     assert(!error);
 }
