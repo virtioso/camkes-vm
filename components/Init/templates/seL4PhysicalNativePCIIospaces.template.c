@@ -25,7 +25,7 @@
 /*- if config_devices is not none and iospace_domain is not none -*/
     /*- for device in config_devices -*/
         /*- set owner_name = device.get('owner', '"guest"').strip('"') -*/
-        /*- if owner_name == 'native' and device.get('iospace', False) -*/
+        /*- if owner_name == 'native' and device.get('native_generated_iospace', False) and device.get('iospace', False) -*/
             /*? add_iospace(device['bus'], device['dev'], device['fun']) ?*/
         /*- endif -*/
     /*- endfor -*/

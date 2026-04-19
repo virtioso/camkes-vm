@@ -22,7 +22,7 @@
 /*- if config_devices is not none -*/
     /*- for device in config_devices -*/
         /*- set owner_name = device.get('owner', '"guest"').strip('"') -*/
-        /*- if owner_name == 'native' -*/
+        /*- if owner_name == 'native' and device.get('native_generated_ioports', False) -*/
             /*- for ioport in device.get('ioports', []) -*/
                 /*? add_ioport(device['bus'], device['dev'], device['fun'], ioport['start'], ioport['end']) ?*/
             /*- endfor -*/

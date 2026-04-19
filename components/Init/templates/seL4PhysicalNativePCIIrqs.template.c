@@ -40,10 +40,11 @@
         /*- set owner_name = device.get('owner', '"guest"').strip('"') -*/
         /*- set irq = device.get('irq') -*/
         /*- set interrupt_pin = device.get('interrupt_pin', 1) -*/
-        /*- if owner_name == 'native' and irq is not none -*/
+        /*- set generate_native_irq = device.get('native_generated_irq', False) -*/
+        /*- if owner_name == 'native' and generate_native_irq and irq is not none -*/
             /*? add_irq(device['name'].strip('"'), device['bus'], device['dev'], device['fun'],
                        irq['ioapic'], irq['source'], irq['level_trig'], irq['active_low'], irq['dest']) ?*/
-        /*- elif owner_name == 'native' and host_bridge == 'qemu_pc_q35' and interrupt_pin >= 1 and interrupt_pin <= 4 -*/
+        /*- elif owner_name == 'native' and generate_native_irq and host_bridge == 'qemu_pc_q35' and interrupt_pin >= 1 and interrupt_pin <= 4 -*/
             /*- set gsi = 20 + ((device['dev'] + interrupt_pin - 1) % 4) -*/
             /*? add_irq(device['name'].strip('"'), device['bus'], device['dev'], device['fun'],
                        0, gsi, 1, 1, gsi) ?*/
