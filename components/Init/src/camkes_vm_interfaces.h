@@ -57,6 +57,19 @@ int physical_pci_irqs_num_irqs(void);
 int physical_pci_irqs_get_irq(int irq, seL4_CPtr *irq_handler, uint8_t *ioapic, uint8_t *source,
                               int *level_trig, int *active_low, uint8_t *dest);
 
+int native_physical_pci_iospaces_num_devices(void);
+int native_physical_pci_iospaces_get_device(int num, uint8_t *bus, uint8_t *dev, uint8_t *fun,
+                                            seL4_CPtr *iospace_cap);
+
+int native_physical_pci_irqs_num_irqs(void);
+int native_physical_pci_irqs_get_irq(int irq, uint8_t *bus, uint8_t *dev, uint8_t *fun,
+                                     seL4_CPtr *irq_handler, uint8_t *ioapic, uint8_t *source,
+                                     int *level_trig, int *active_low, uint8_t *dest);
+
+int native_physical_pci_ioports_num_ranges(void);
+int native_physical_pci_ioports_get_range(int num, uint8_t *bus, uint8_t *dev, uint8_t *fun,
+                                          seL4_CPtr *cap, uint16_t *start, uint16_t *end);
+
 int irqs_num_irqs();
 const char *irqs_get_irq(int irq, seL4_CPtr *irq_handler, uint8_t *ioapic, uint8_t *source, int *level_trig,
                          int *active_low, uint8_t *dest);

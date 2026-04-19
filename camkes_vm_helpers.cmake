@@ -59,6 +59,9 @@ function(DeclareCAmkESVM init_component)
         seL4PhysicalPCIDevices.template.c
         seL4PhysicalPCIIospaces.template.c
         seL4PhysicalPCIIrqs.template.c
+        seL4PhysicalNativePCIIospaces.template.c
+        seL4PhysicalNativePCIIrqs.template.c
+        seL4PhysicalNativePCIIOPorts.template.c
         seL4VMIRQs.template.c
         seL4VMPCIDevices.template.c
     )
