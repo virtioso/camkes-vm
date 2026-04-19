@@ -48,6 +48,7 @@ int physical_pci_devices_num_devices(void);
 int physical_pci_devices_get_device(int num, uint8_t *bus, uint8_t *dev, uint8_t *fun, int *owner);
 int physical_pci_devices_get_owner(uint8_t bus, uint8_t dev, uint8_t fun);
 int physical_pci_devices_guest_visible(uint8_t bus, uint8_t dev, uint8_t fun);
+int physical_pci_devices_get_interrupt_pin(uint8_t bus, uint8_t dev, uint8_t fun);
 
 int physical_pci_iospaces_num_devices(void);
 int physical_pci_iospaces_get_device(int num, uint8_t *bus, uint8_t *dev, uint8_t *fun, seL4_CPtr *iospace_cap);

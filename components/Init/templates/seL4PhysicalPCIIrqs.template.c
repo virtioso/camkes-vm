@@ -28,22 +28,29 @@
 /*- endmacro -*/
 
 /*
- * Structural q35 physical PCI passthrough still uses legacy INTx routing.
- * For the current qemu_pc99 path, the outer modern virtio-net/blk devices
- * route through GSI 11. Generate that handler up front and let Init bind it
- * lazily when it discovers the physical devices at runtime.
+ * Structural q35 physical PCI passthrough uses the QEMU/ICH9 default legacy
+ * INTx routing model from hw/isa/lpc_ich9.c:
+ *   PIRQ = (slot + intx) % 4 + 4
+ *   GSI  = 16 + PIRQ
+ * For INTA-D expressed as PCI interrupt pins 1-4, that becomes:
+ *   GSI = 20 + ((slot + pin - 1) % 4)
  */
 /*- if config_devices is not none -*/
     /*- for device in config_devices -*/
         /*- set owner_name = device.get('owner', '"guest"').strip('"') -*/
         /*- set irq = device.get('irq') -*/
+        /*- set interrupt_pin = device.get('interrupt_pin', 1) -*/
         /*- if owner_name == 'guest' and irq is not none -*/
             /*? add_irq(device['name'].strip('"'), irq['ioapic'], irq['source'],
                        irq['level_trig'], irq['active_low'], irq['dest']) ?*/
+        /*- elif owner_name == 'guest' and host_bridge == 'qemu_pc_q35' and interrupt_pin >= 1 and interrupt_pin <= 4 -*/
+            /*- set gsi = 20 + ((device['dev'] + interrupt_pin - 1) % 4) -*/
+            /*? add_irq(device['name'].strip('"'), 0, gsi, 1, 1, gsi) ?*/
         /*- endif -*/
     /*- endfor -*/
 /*- elif host_bridge == 'qemu_pc_q35' -*/
-    /*? add_irq('q35-intx-11', 0, 11, 1, 1, 11) ?*/
+    /*? add_irq('q35-slot1-inta', 0, 21, 1, 1, 21) ?*/
+    /*? add_irq('q35-slot2-inta', 0, 22, 1, 1, 22) ?*/
 /*- endif -*/
 
 int physical_pci_irqs_num_irqs(void)

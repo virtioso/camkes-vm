@@ -30,6 +30,14 @@
 #define VM_PIC_BADGE_IRQ_13 134234112 /* BIT(27) | BIT(14) */
 #define VM_PIC_BADGE_IRQ_14 134250496 /* BIT(27) | BIT(15) */
 #define VM_PIC_BADGE_IRQ_15 134283264 /* BIT(27) | BIT(16) */
+#define VM_PIC_BADGE_IRQ_16 ((1u << 27) | (1u << 17))
+#define VM_PIC_BADGE_IRQ_17 ((1u << 27) | (1u << 18))
+#define VM_PIC_BADGE_IRQ_18 ((1u << 27) | (1u << 19))
+#define VM_PIC_BADGE_IRQ_19 ((1u << 27) | (1u << 20))
+#define VM_PIC_BADGE_IRQ_20 ((1u << 27) | (1u << 21))
+#define VM_PIC_BADGE_IRQ_21 ((1u << 27) | (1u << 22))
+#define VM_PIC_BADGE_IRQ_22 ((1u << 27) | (1u << 23))
+#define VM_PIC_BADGE_IRQ_23 ((1u << 27) | (1u << 24))
 
 /* Base definition of the Init component. This gets
  * extended in the per Vm configuration */
@@ -102,7 +110,7 @@
     vm##num.serial_getchar_shmem_size = 0x1000; \
     vm##num.simple = true; \
     vm##num.asid_pool = true; \
-    vm##num.global_endpoint_mask = 0x1fffffff & ~0x1fffe; \
+    vm##num.global_endpoint_mask = 0x1fffffff & ~0x1fffffe; \
     vm##num.global_endpoint_base = 1 << 27; \
     VM_MAYBE_ZONE_DMA(num) \
     /**/

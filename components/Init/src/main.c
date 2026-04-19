@@ -100,6 +100,10 @@ static vmm_io_port_list_t *io_ports;
 
 vm_t vm;
 
+#define PHYSICAL_PCI_DEVICE_OWNER_NONE   0
+#define PHYSICAL_PCI_DEVICE_OWNER_GUEST  1
+#define PHYSICAL_PCI_DEVICE_OWNER_NATIVE 2
+
 extern int camkes_get_untyped_page_bits(uintptr_t addr);
 int camkes_cross_vm_connections_init(vm_t *vm, vmm_pci_space_t *pci,
                                      seL4_CPtr irq_notification, uintptr_t connection_base_address) WEAK;
@@ -146,7 +150,7 @@ bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *
     return false;
 }
 
-static bool physical_q35_pci_uses_structural_host_bridge(vm_t *vm)
+static bool physical_q35_guest_prt_supported(vm_t *vm)
 {
     vmm_pci_host_bridge_t bridge;
     vmm_pci_host_bridge_init_empty(&bridge);
@@ -156,6 +160,86 @@ static bool physical_q35_pci_uses_structural_host_bridge(vm_t *vm)
 
     return vmm_pci_host_bridge_region_valid(bridge.mcfg_region) &&
            vmm_pci_host_bridge_region_valid(bridge.mem32_region);
+}
+
+int vmm_guest_num_physical_pci_prt_entries(vm_t *vm)
+{
+    if (!physical_q35_guest_prt_supported(vm)) {
+        return 0;
+    }
+
+    int count = 0;
+    for (int i = 0; i < physical_pci_devices_num_devices(); i++) {
+        uint8_t bus;
+        uint8_t dev;
+        uint8_t fun;
+        int owner;
+        uint32_t gsi;
+        int pin;
+
+        if (physical_pci_devices_get_device(i, &bus, &dev, &fun, &owner)) {
+            continue;
+        }
+        if (owner != PHYSICAL_PCI_DEVICE_OWNER_GUEST || bus != 0) {
+            continue;
+        }
+
+        pin = physical_pci_devices_get_interrupt_pin(bus, dev, fun);
+        if (!vmm_pci_host_bridge_qemu_pc_q35_route_intx(dev, pin, &gsi)) {
+            continue;
+        }
+        count++;
+    }
+
+    return count;
+}
+
+int vmm_guest_get_physical_pci_prt_entry(vm_t *vm,
+                                         int index,
+                                         uint8_t *device,
+                                         uint8_t *pin,
+                                         uint32_t *gsi)
+{
+    if (!physical_q35_guest_prt_supported(vm) || !device || !pin || !gsi) {
+        return -1;
+    }
+
+    int current = 0;
+    for (int i = 0; i < physical_pci_devices_num_devices(); i++) {
+        uint8_t bus;
+        uint8_t dev;
+        uint8_t fun;
+        int owner;
+        uint32_t routed_gsi;
+        int interrupt_pin;
+
+        if (physical_pci_devices_get_device(i, &bus, &dev, &fun, &owner)) {
+            continue;
+        }
+        if (owner != PHYSICAL_PCI_DEVICE_OWNER_GUEST || bus != 0) {
+            continue;
+        }
+
+        interrupt_pin = physical_pci_devices_get_interrupt_pin(bus, dev, fun);
+        if (!vmm_pci_host_bridge_qemu_pc_q35_route_intx(dev, interrupt_pin, &routed_gsi)) {
+            continue;
+        }
+
+        if (current == index) {
+            *device = dev;
+            *pin = interrupt_pin - 1;
+            *gsi = routed_gsi;
+            return 0;
+        }
+        current++;
+    }
+
+    return -1;
+}
+
+static bool physical_q35_pci_uses_structural_host_bridge(vm_t *vm)
+{
+    return physical_q35_guest_prt_supported(vm);
 }
 
 static bool physical_q35_needs_synthetic_pci_space(vm_t *vm)
@@ -669,7 +753,7 @@ void serial_timer_interrupt(uint32_t);
 void hpet_timer_interrupt(uint32_t);
 #endif
 
-static seL4_Word irq_badges[16] = {
+static seL4_Word irq_badges[] = {
     VM_PIC_BADGE_IRQ_0,
     VM_PIC_BADGE_IRQ_1,
     VM_PIC_BADGE_IRQ_2,
@@ -685,7 +769,15 @@ static seL4_Word irq_badges[16] = {
     VM_PIC_BADGE_IRQ_12,
     VM_PIC_BADGE_IRQ_13,
     VM_PIC_BADGE_IRQ_14,
-    VM_PIC_BADGE_IRQ_15
+    VM_PIC_BADGE_IRQ_15,
+    VM_PIC_BADGE_IRQ_16,
+    VM_PIC_BADGE_IRQ_17,
+    VM_PIC_BADGE_IRQ_18,
+    VM_PIC_BADGE_IRQ_19,
+    VM_PIC_BADGE_IRQ_20,
+    VM_PIC_BADGE_IRQ_21,
+    VM_PIC_BADGE_IRQ_22,
+    VM_PIC_BADGE_IRQ_23
 };
 
 void serial_character_interrupt(void);
