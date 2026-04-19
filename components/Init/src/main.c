@@ -821,10 +821,10 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
         if ((badge & serial_getchar_notification_badge()) == serial_getchar_notification_badge()) {
             serial_character_interrupt();
         }
-        for (int i = 0; i < 16; i++) {
+        for (size_t i = 0; i < ARRAY_SIZE(irq_badges); i++) {
             if ((badge & irq_badges[i]) == irq_badges[i]) {
                 if (host_irq_log_count < 32) {
-                    ZF_LOGE("External IRQ badge irq=%d", i);
+                    ZF_LOGE("External IRQ badge irq=%zu", i);
                     host_irq_log_count++;
                 }
                 vm_inject_irq(vm->vcpus[BOOT_VCPU], i);
