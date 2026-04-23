@@ -150,8 +150,17 @@ bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *
     return false;
 }
 
+static bool physical_q35_has_assigned_resources(void)
+{
+    return physical_pci_host_bridge_num_regions() > 0 || physical_pci_devices_num_devices() > 0;
+}
+
 static bool physical_q35_guest_prt_supported(vm_t *vm)
 {
+    if (!physical_q35_has_assigned_resources()) {
+        return false;
+    }
+
     vmm_pci_host_bridge_t bridge;
     vmm_pci_host_bridge_init_empty(&bridge);
     if (!vmm_guest_detect_physical_pci_host_bridge(vm, &bridge)) {
@@ -287,6 +296,10 @@ static int register_physical_pci_device(vm_t *vm, libpci_device_t *device, int i
 
 static void reserve_physical_pci_host_apertures(vm_t *vm)
 {
+    if (!physical_q35_has_assigned_resources()) {
+        return;
+    }
+
     int generated_regions = physical_pci_host_bridge_num_regions();
     if (generated_regions > 0) {
         for (int i = 0; i < generated_regions; i++) {
@@ -1055,6 +1068,10 @@ static bool qemu_auto_passthrough_candidate(const libpci_device_t *device)
 
 static int auto_register_qemu_pci_passthrough(vm_t *vm)
 {
+    if (!physical_q35_has_assigned_resources()) {
+        return 0;
+    }
+
     for (uint32_t pci_idx = 0; pci_idx < libpci_num_devices; pci_idx++) {
         libpci_device_t *device = &libpci_device_list[pci_idx];
         if (!qemu_auto_passthrough_candidate(device)) {
