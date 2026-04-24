@@ -20,6 +20,7 @@
 #include <allocman/vka.h>
 #include <simple/simple_helpers.h>
 #include <utils/util.h>
+#include <sel4/arch/vmenter.h>
 #include <vka/capops.h>
 #include <pci/pci.h>
 
@@ -100,6 +101,148 @@ static vmm_io_port_list_t *io_ports;
 
 vm_t vm;
 
+#define VMM_DEBUG_EXIT_REASON_SLOTS 64
+
+typedef struct vmm_debug_counters {
+    uint64_t heartbeat_seq;
+    uint64_t vm_enter_total;
+    uint64_t vm_fault_total;
+    uint64_t vm_notify_total;
+    uint64_t vm_exit_total;
+    uint64_t vm_exit_reason_total[VMM_DEBUG_EXIT_REASON_SLOTS];
+    uint64_t async_badge_total;
+    uint64_t init_timer_badge_total;
+    uint64_t serial_getchar_badge_total;
+    uint64_t irq_inject_total;
+    uint64_t irq_inject_by_line[24];
+    uint64_t device_notify_total;
+    uint64_t vmrun_return_total;
+    int last_vmrun_ret;
+    int last_vmrun_exit_reason;
+} vmm_debug_counters_t;
+
+static vmm_debug_counters_t vmm_debug_counters;
+static vmm_debug_counters_t vmm_debug_last_heartbeat;
+
+static const char *vmm_debug_exit_reason_name(int reason)
+{
+    switch (reason) {
+    case 1:
+        return "EXTINT";
+    case 7:
+        return "PENDING_INTERRUPT";
+    case 10:
+        return "CPUID";
+    case 12:
+        return "HLT";
+    case 18:
+        return "VMCALL";
+    case 28:
+        return "CR_ACCESS";
+    case 30:
+        return "IO_INSTRUCTION";
+    case 31:
+        return "MSR_READ";
+    case 32:
+        return "MSR_WRITE";
+    case 48:
+        return "EPT_VIOLATION";
+    case 49:
+        return "EPT_MISCONFIG";
+    case 52:
+        return "VMX_TIMER";
+    default:
+        return "OTHER";
+    }
+}
+
+static const char *vmm_debug_vm_label(void)
+{
+    const char *name = get_instance_name();
+    return name ? name : "unknown";
+}
+
+void vmm_debug_note_vmenter_result(int fault, UNUSED seL4_Word badge)
+{
+    vmm_debug_counters.vm_enter_total++;
+    if (fault == SEL4_VMENTER_RESULT_FAULT) {
+        vmm_debug_counters.vm_fault_total++;
+    } else {
+        vmm_debug_counters.vm_notify_total++;
+    }
+}
+
+void vmm_debug_note_vmexit_reason(int reason, UNUSED int ret)
+{
+    vmm_debug_counters.vm_exit_total++;
+    if (reason >= 0 && reason < VMM_DEBUG_EXIT_REASON_SLOTS) {
+        vmm_debug_counters.vm_exit_reason_total[reason]++;
+    }
+}
+
+void vmm_debug_note_vmrun_return(int ret, int exit_reason)
+{
+    vmm_debug_counters.vmrun_return_total++;
+    vmm_debug_counters.last_vmrun_ret = ret;
+    vmm_debug_counters.last_vmrun_exit_reason = exit_reason;
+    printf("\n[vmmdbg] vm=%s vm_run_return ret=%d exit_reason=%d\n",
+           vmm_debug_vm_label(), ret, exit_reason);
+    fflush(stdout);
+}
+
+static void vmm_debug_emit_heartbeat(void)
+{
+    uint64_t heartbeat_seq = ++vmm_debug_counters.heartbeat_seq;
+    uint64_t delta_vm_enter = vmm_debug_counters.vm_enter_total - vmm_debug_last_heartbeat.vm_enter_total;
+    uint64_t delta_vm_fault = vmm_debug_counters.vm_fault_total - vmm_debug_last_heartbeat.vm_fault_total;
+    uint64_t delta_vm_notify = vmm_debug_counters.vm_notify_total - vmm_debug_last_heartbeat.vm_notify_total;
+    uint64_t delta_vm_exit = vmm_debug_counters.vm_exit_total - vmm_debug_last_heartbeat.vm_exit_total;
+    uint64_t delta_async_badge = vmm_debug_counters.async_badge_total - vmm_debug_last_heartbeat.async_badge_total;
+    uint64_t delta_timer_badge = vmm_debug_counters.init_timer_badge_total - vmm_debug_last_heartbeat.init_timer_badge_total;
+    uint64_t delta_serial_badge = vmm_debug_counters.serial_getchar_badge_total -
+                                  vmm_debug_last_heartbeat.serial_getchar_badge_total;
+    uint64_t delta_irq = vmm_debug_counters.irq_inject_total - vmm_debug_last_heartbeat.irq_inject_total;
+    uint64_t delta_device_notify = vmm_debug_counters.device_notify_total - vmm_debug_last_heartbeat.device_notify_total;
+    int top_reason = -1;
+    uint64_t top_reason_delta = 0;
+
+    for (int i = 0; i < VMM_DEBUG_EXIT_REASON_SLOTS; i++) {
+        uint64_t delta = vmm_debug_counters.vm_exit_reason_total[i] - vmm_debug_last_heartbeat.vm_exit_reason_total[i];
+        if (delta > top_reason_delta) {
+            top_reason_delta = delta;
+            top_reason = i;
+        }
+    }
+
+    printf("\n[vmmdbg] vm=%s hb=%llu enter=+%llu/%llu fault=+%llu notify=+%llu exit=+%llu async=+%llu timer=+%llu serial=+%llu irq=+%llu device=+%llu",
+           vmm_debug_vm_label(),
+           (unsigned long long)heartbeat_seq,
+           (unsigned long long)delta_vm_enter,
+           (unsigned long long)vmm_debug_counters.vm_enter_total,
+           (unsigned long long)delta_vm_fault,
+           (unsigned long long)delta_vm_notify,
+           (unsigned long long)delta_vm_exit,
+           (unsigned long long)delta_async_badge,
+           (unsigned long long)delta_timer_badge,
+           (unsigned long long)delta_serial_badge,
+           (unsigned long long)delta_irq,
+           (unsigned long long)delta_device_notify);
+    if (top_reason >= 0) {
+        printf(" top_exit=%s(%d)+%llu/%llu",
+               vmm_debug_exit_reason_name(top_reason),
+               top_reason,
+               (unsigned long long)top_reason_delta,
+               (unsigned long long)vmm_debug_counters.vm_exit_reason_total[top_reason]);
+    }
+    printf(" vmrun_return=%llu last_vmrun_ret=%d last_vmrun_exit_reason=%d\n",
+           (unsigned long long)vmm_debug_counters.vmrun_return_total,
+           vmm_debug_counters.last_vmrun_ret,
+           vmm_debug_counters.last_vmrun_exit_reason);
+    fflush(stdout);
+
+    vmm_debug_last_heartbeat = vmm_debug_counters;
+}
+
 #define PHYSICAL_PCI_DEVICE_OWNER_NONE   0
 #define PHYSICAL_PCI_DEVICE_OWNER_GUEST  1
 #define PHYSICAL_PCI_DEVICE_OWNER_NATIVE 2
@@ -112,6 +255,11 @@ bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *
 {
     (void)vm;
     if (!bridge) {
+        return false;
+    }
+
+    if (physical_pci_host_bridge_num_regions() == 0 && physical_pci_devices_num_devices() == 0) {
+        vmm_pci_host_bridge_init_empty(bridge);
         return false;
     }
 
@@ -805,7 +953,9 @@ extern seL4_Word serial_getchar_notification_badge(void);
 static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo_t tag, void *cookie)
 {
     if (badge & BIT(27)) {
+        vmm_debug_counters.async_badge_total++;
         if ((badge & init_timer_notification_badge()) == init_timer_notification_badge()) {
+            vmm_debug_counters.init_timer_badge_total++;
             uint32_t completed = init_timer_completed();
             if (completed & BIT(TIMER_PIT)) {
                 pit_timer_interrupt();
@@ -813,6 +963,9 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
             if (completed & (BIT(TIMER_PERIODIC_TIMER) | BIT(TIMER_COALESCED_TIMER) | BIT(TIMER_SECOND_TIMER) | BIT(
                                  TIMER_SECOND_TIMER2))) {
                 rtc_timer_interrupt(completed);
+            }
+            if (completed & BIT(TIMER_SECOND_TIMER)) {
+                vmm_debug_emit_heartbeat();
             }
             if (completed & (BIT(TIMER_FIFO_TIMEOUT) | BIT(TIMER_TRANSMIT_TIMER) | BIT(TIMER_MODEM_STATUS_TIMER) | BIT(
                                  TIMER_MORE_CHARS))) {
@@ -825,16 +978,22 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
 #endif
         }
         if ((badge & serial_getchar_notification_badge()) == serial_getchar_notification_badge()) {
+            vmm_debug_counters.serial_getchar_badge_total++;
             serial_character_interrupt();
         }
         for (size_t i = 0; i < ARRAY_SIZE(irq_badges); i++) {
             if ((badge & irq_badges[i]) == irq_badges[i]) {
+                vmm_debug_counters.irq_inject_total++;
+                if (i < ARRAY_SIZE(vmm_debug_counters.irq_inject_by_line)) {
+                    vmm_debug_counters.irq_inject_by_line[i]++;
+                }
                 vm_inject_irq(vm->vcpus[BOOT_VCPU], i);
             }
         }
         for (int i = 0; i < device_notify_list_len; i++) {
             uint32_t device_badge = device_notify_list[i].badge;
             if ((badge & device_badge) == device_badge) {
+                vmm_debug_counters.device_notify_total++;
                 ZF_LOGF_IF(device_notify_list[i].func == NULL, "Undefined notify func");
                 device_notify_list[i].func(vm);
             }
