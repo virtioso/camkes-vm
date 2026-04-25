@@ -484,11 +484,6 @@ static void pit_irq_timer_update(PITChannelState *s, int64_t current_time)
     }
     expire_time = pit_get_next_transition_time(s, current_time);
     irq_level = pit_get_out(s, current_time);
-    if (pit_irq_log_count < 32) {
-        ZF_LOGE("PIT irq update level=%d next=%lld now=%lld count=%d mode=%d",
-                irq_level, (long long)expire_time, (long long)current_time, s->count, s->mode);
-        pit_irq_log_count++;
-    }
     //qemu_set_irq(s->irq, irq_level);
     vm_set_irq_level(vm.vcpus[BOOT_VCPU], TIMER_IRQ, irq_level);
 #ifdef DEBUG_PIT
@@ -511,10 +506,6 @@ static void pit_irq_timer(void *opaque)
 {
     PITChannelState *s = opaque;
 
-    if (pit_timer_callback_log_count < 32) {
-        ZF_LOGE("PIT timer callback next=%lld", (long long)s->next_transition_time);
-        pit_timer_callback_log_count++;
-    }
     pit_irq_timer_update(s, s->next_transition_time);
 }
 
