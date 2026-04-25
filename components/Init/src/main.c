@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <autoconf.h>
 #include <camkes_vmm/gen_config.h>
 #include <utils/util.h>
@@ -54,6 +55,7 @@
 
 #include "vm.h"
 #include "timers.h"
+#include "console_frame_transport.h"
 #include "fsclient.h"
 #include "virtio_net.h"
 #include "virtio_net_vswitch.h"
@@ -102,6 +104,7 @@ static vmm_io_port_list_t *io_ports;
 vm_t vm;
 
 #define VMM_DEBUG_EXIT_REASON_SLOTS 64
+#define VMM_DEBUG_EPT_PAGE_SLOTS 8
 
 typedef struct vmm_debug_counters {
     uint64_t heartbeat_seq;
@@ -116,9 +119,24 @@ typedef struct vmm_debug_counters {
     uint64_t irq_inject_total;
     uint64_t irq_inject_by_line[24];
     uint64_t device_notify_total;
+    uint64_t console_diag_calls;
+    uint64_t console_diag_payload_bytes;
+    uint64_t console_diag_wire_bytes;
+    uint64_t console_diag_cycles;
+    uint64_t console_debug_calls;
+    uint64_t console_debug_payload_bytes;
+    uint64_t console_debug_wire_bytes;
+    uint64_t console_debug_cycles;
+    uint64_t console_guest_calls;
+    uint64_t console_guest_payload_bytes;
+    uint64_t console_guest_wire_bytes;
+    uint64_t console_guest_cycles;
     uint64_t vmrun_return_total;
     int last_vmrun_ret;
     int last_vmrun_exit_reason;
+    uintptr_t last_ept_guest_phys;
+    uintptr_t ept_page[VMM_DEBUG_EPT_PAGE_SLOTS];
+    uint64_t ept_page_count[VMM_DEBUG_EPT_PAGE_SLOTS];
 } vmm_debug_counters_t;
 
 static vmm_debug_counters_t vmm_debug_counters;
@@ -162,6 +180,29 @@ static const char *vmm_debug_vm_label(void)
     return name ? name : "unknown";
 }
 
+static void vmm_debug_emitf(const char *fmt, ...)
+{
+    char buffer[512];
+    va_list args;
+    int len;
+
+    va_start(args, fmt);
+    len = vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+
+    if (len < 0) {
+        return;
+    }
+
+    int limit = len;
+    if (limit > (int)sizeof(buffer)) {
+        limit = (int)sizeof(buffer);
+    }
+    for (int i = 0; i < limit; i++) {
+        vmm_console_debug_putchar(buffer[i]);
+    }
+}
+
 void vmm_debug_note_vmenter_result(int fault, UNUSED seL4_Word badge)
 {
     vmm_debug_counters.vm_enter_total++;
@@ -172,11 +213,39 @@ void vmm_debug_note_vmenter_result(int fault, UNUSED seL4_Word badge)
     }
 }
 
-void vmm_debug_note_vmexit_reason(int reason, UNUSED int ret)
+static void vmm_debug_note_ept_guest_phys(uintptr_t guest_phys)
+{
+    uintptr_t page = ROUND_DOWN(guest_phys, BIT(PAGE_BITS_4K));
+
+    vmm_debug_counters.last_ept_guest_phys = guest_phys;
+    for (int i = 0; i < VMM_DEBUG_EPT_PAGE_SLOTS; i++) {
+        if (vmm_debug_counters.ept_page_count[i] == 0 ||
+            vmm_debug_counters.ept_page[i] == page) {
+            vmm_debug_counters.ept_page[i] = page;
+            vmm_debug_counters.ept_page_count[i]++;
+            return;
+        }
+    }
+
+    int min_slot = 0;
+    for (int i = 1; i < VMM_DEBUG_EPT_PAGE_SLOTS; i++) {
+        if (vmm_debug_counters.ept_page_count[i] < vmm_debug_counters.ept_page_count[min_slot]) {
+            min_slot = i;
+        }
+    }
+
+    vmm_debug_counters.ept_page[min_slot] = page;
+    vmm_debug_counters.ept_page_count[min_slot] = 1;
+}
+
+void vmm_debug_note_vmexit_reason(int reason, UNUSED int ret, uintptr_t guest_phys)
 {
     vmm_debug_counters.vm_exit_total++;
     if (reason >= 0 && reason < VMM_DEBUG_EXIT_REASON_SLOTS) {
         vmm_debug_counters.vm_exit_reason_total[reason]++;
+    }
+    if (reason == 48) {
+        vmm_debug_note_ept_guest_phys(guest_phys);
     }
 }
 
@@ -185,13 +254,13 @@ void vmm_debug_note_vmrun_return(int ret, int exit_reason)
     vmm_debug_counters.vmrun_return_total++;
     vmm_debug_counters.last_vmrun_ret = ret;
     vmm_debug_counters.last_vmrun_exit_reason = exit_reason;
-    printf("\n[vmmdbg] vm=%s vm_run_return ret=%d exit_reason=%d\n",
-           vmm_debug_vm_label(), ret, exit_reason);
-    fflush(stdout);
+    vmm_debug_emitf("\n[vmmdbg] vm=%s vm_run_return ret=%d exit_reason=%d\n",
+                    vmm_debug_vm_label(), ret, exit_reason);
 }
 
 static void vmm_debug_emit_heartbeat(void)
 {
+    vmm_console_transport_stats_t console_stats = {0};
     uint64_t heartbeat_seq = ++vmm_debug_counters.heartbeat_seq;
     uint64_t delta_vm_enter = vmm_debug_counters.vm_enter_total - vmm_debug_last_heartbeat.vm_enter_total;
     uint64_t delta_vm_fault = vmm_debug_counters.vm_fault_total - vmm_debug_last_heartbeat.vm_fault_total;
@@ -203,8 +272,22 @@ static void vmm_debug_emit_heartbeat(void)
                                   vmm_debug_last_heartbeat.serial_getchar_badge_total;
     uint64_t delta_irq = vmm_debug_counters.irq_inject_total - vmm_debug_last_heartbeat.irq_inject_total;
     uint64_t delta_device_notify = vmm_debug_counters.device_notify_total - vmm_debug_last_heartbeat.device_notify_total;
+    uint64_t delta_console_diag_calls;
+    uint64_t delta_console_diag_payload_bytes;
+    uint64_t delta_console_diag_wire_bytes;
+    uint64_t delta_console_diag_cycles;
+    uint64_t delta_console_debug_calls;
+    uint64_t delta_console_debug_payload_bytes;
+    uint64_t delta_console_debug_wire_bytes;
+    uint64_t delta_console_debug_cycles;
+    uint64_t delta_console_guest_calls;
+    uint64_t delta_console_guest_payload_bytes;
+    uint64_t delta_console_guest_wire_bytes;
+    uint64_t delta_console_guest_cycles;
     int top_reason = -1;
     uint64_t top_reason_delta = 0;
+    uintptr_t top_ept_page = 0;
+    uint64_t top_ept_page_count = 0;
 
     for (int i = 0; i < VMM_DEBUG_EXIT_REASON_SLOTS; i++) {
         uint64_t delta = vmm_debug_counters.vm_exit_reason_total[i] - vmm_debug_last_heartbeat.vm_exit_reason_total[i];
@@ -213,34 +296,99 @@ static void vmm_debug_emit_heartbeat(void)
             top_reason = i;
         }
     }
-
-    printf("\n[vmmdbg] vm=%s hb=%llu enter=+%llu/%llu fault=+%llu notify=+%llu exit=+%llu async=+%llu timer=+%llu serial=+%llu irq=+%llu device=+%llu",
-           vmm_debug_vm_label(),
-           (unsigned long long)heartbeat_seq,
-           (unsigned long long)delta_vm_enter,
-           (unsigned long long)vmm_debug_counters.vm_enter_total,
-           (unsigned long long)delta_vm_fault,
-           (unsigned long long)delta_vm_notify,
-           (unsigned long long)delta_vm_exit,
-           (unsigned long long)delta_async_badge,
-           (unsigned long long)delta_timer_badge,
-           (unsigned long long)delta_serial_badge,
-           (unsigned long long)delta_irq,
-           (unsigned long long)delta_device_notify);
-    if (top_reason >= 0) {
-        printf(" top_exit=%s(%d)+%llu/%llu",
-               vmm_debug_exit_reason_name(top_reason),
-               top_reason,
-               (unsigned long long)top_reason_delta,
-               (unsigned long long)vmm_debug_counters.vm_exit_reason_total[top_reason]);
+    for (int i = 0; i < VMM_DEBUG_EPT_PAGE_SLOTS; i++) {
+        if (vmm_debug_counters.ept_page_count[i] > top_ept_page_count) {
+            top_ept_page = vmm_debug_counters.ept_page[i];
+            top_ept_page_count = vmm_debug_counters.ept_page_count[i];
+        }
     }
-    printf(" vmrun_return=%llu last_vmrun_ret=%d last_vmrun_exit_reason=%d\n",
-           (unsigned long long)vmm_debug_counters.vmrun_return_total,
-           vmm_debug_counters.last_vmrun_ret,
-           vmm_debug_counters.last_vmrun_exit_reason);
-    fflush(stdout);
+
+    vmm_console_transport_get_stats(&console_stats);
+    vmm_debug_counters.console_diag_calls = console_stats.diag_calls;
+    vmm_debug_counters.console_diag_payload_bytes = console_stats.diag_payload_bytes;
+    vmm_debug_counters.console_diag_wire_bytes = console_stats.diag_wire_bytes;
+    vmm_debug_counters.console_diag_cycles = console_stats.diag_cycles;
+    vmm_debug_counters.console_debug_calls = console_stats.debug_calls;
+    vmm_debug_counters.console_debug_payload_bytes = console_stats.debug_payload_bytes;
+    vmm_debug_counters.console_debug_wire_bytes = console_stats.debug_wire_bytes;
+    vmm_debug_counters.console_debug_cycles = console_stats.debug_cycles;
+    vmm_debug_counters.console_guest_calls = console_stats.guest_calls;
+    vmm_debug_counters.console_guest_payload_bytes = console_stats.guest_payload_bytes;
+    vmm_debug_counters.console_guest_wire_bytes = console_stats.guest_wire_bytes;
+    vmm_debug_counters.console_guest_cycles = console_stats.guest_cycles;
+
+    delta_console_diag_calls = vmm_debug_counters.console_diag_calls -
+                               vmm_debug_last_heartbeat.console_diag_calls;
+    delta_console_diag_payload_bytes = vmm_debug_counters.console_diag_payload_bytes -
+                                       vmm_debug_last_heartbeat.console_diag_payload_bytes;
+    delta_console_diag_wire_bytes = vmm_debug_counters.console_diag_wire_bytes -
+                                    vmm_debug_last_heartbeat.console_diag_wire_bytes;
+    delta_console_diag_cycles = vmm_debug_counters.console_diag_cycles -
+                                vmm_debug_last_heartbeat.console_diag_cycles;
+    delta_console_debug_calls = vmm_debug_counters.console_debug_calls -
+                                vmm_debug_last_heartbeat.console_debug_calls;
+    delta_console_debug_payload_bytes = vmm_debug_counters.console_debug_payload_bytes -
+                                        vmm_debug_last_heartbeat.console_debug_payload_bytes;
+    delta_console_debug_wire_bytes = vmm_debug_counters.console_debug_wire_bytes -
+                                     vmm_debug_last_heartbeat.console_debug_wire_bytes;
+    delta_console_debug_cycles = vmm_debug_counters.console_debug_cycles -
+                                 vmm_debug_last_heartbeat.console_debug_cycles;
+    delta_console_guest_calls = vmm_debug_counters.console_guest_calls -
+                                vmm_debug_last_heartbeat.console_guest_calls;
+    delta_console_guest_payload_bytes = vmm_debug_counters.console_guest_payload_bytes -
+                                        vmm_debug_last_heartbeat.console_guest_payload_bytes;
+    delta_console_guest_wire_bytes = vmm_debug_counters.console_guest_wire_bytes -
+                                     vmm_debug_last_heartbeat.console_guest_wire_bytes;
+    delta_console_guest_cycles = vmm_debug_counters.console_guest_cycles -
+                                 vmm_debug_last_heartbeat.console_guest_cycles;
+
+    vmm_debug_emitf("\n[vmmdbg] vm=%s hb=%llu enter=+%llu/%llu fault=+%llu notify=+%llu exit=+%llu async=+%llu timer=+%llu serial=+%llu irq=+%llu device=+%llu",
+                    vmm_debug_vm_label(),
+                    (unsigned long long)heartbeat_seq,
+                    (unsigned long long)delta_vm_enter,
+                    (unsigned long long)vmm_debug_counters.vm_enter_total,
+                    (unsigned long long)delta_vm_fault,
+                    (unsigned long long)delta_vm_notify,
+                    (unsigned long long)delta_vm_exit,
+                    (unsigned long long)delta_async_badge,
+                    (unsigned long long)delta_timer_badge,
+                    (unsigned long long)delta_serial_badge,
+                    (unsigned long long)delta_irq,
+                    (unsigned long long)delta_device_notify);
+    vmm_debug_emitf(" txg=+%lluB/%lluB wb=+%llu cyc=+%llu txd=+%lluB/%lluB wb=+%llu cyc=+%llu txdbg=+%lluB/%lluB wb=+%llu cyc=+%llu",
+                    (unsigned long long)delta_console_guest_payload_bytes,
+                    (unsigned long long)vmm_debug_counters.console_guest_payload_bytes,
+                    (unsigned long long)delta_console_guest_wire_bytes,
+                    (unsigned long long)delta_console_guest_cycles,
+                    (unsigned long long)delta_console_diag_payload_bytes,
+                    (unsigned long long)vmm_debug_counters.console_diag_payload_bytes,
+                    (unsigned long long)delta_console_diag_wire_bytes,
+                    (unsigned long long)delta_console_diag_cycles,
+                    (unsigned long long)delta_console_debug_payload_bytes,
+                    (unsigned long long)vmm_debug_counters.console_debug_payload_bytes,
+                    (unsigned long long)delta_console_debug_wire_bytes,
+                    (unsigned long long)delta_console_debug_cycles);
+    if (top_reason >= 0) {
+        vmm_debug_emitf(" top_exit=%s(%d)+%llu/%llu",
+                        vmm_debug_exit_reason_name(top_reason),
+                        top_reason,
+                        (unsigned long long)top_reason_delta,
+                        (unsigned long long)vmm_debug_counters.vm_exit_reason_total[top_reason]);
+    }
+    if (top_ept_page_count > 0) {
+        vmm_debug_emitf(" top_ept_page=0x%lx+%llu last_ept=0x%lx",
+                        (unsigned long)top_ept_page,
+                        (unsigned long long)top_ept_page_count,
+                        (unsigned long)vmm_debug_counters.last_ept_guest_phys);
+    }
+    vmm_debug_emitf(" vmrun_return=%llu last_vmrun_ret=%d last_vmrun_exit_reason=%d\n",
+                    (unsigned long long)vmm_debug_counters.vmrun_return_total,
+                    vmm_debug_counters.last_vmrun_ret,
+                    vmm_debug_counters.last_vmrun_exit_reason);
 
     vmm_debug_last_heartbeat = vmm_debug_counters;
+    memset(vmm_debug_counters.ept_page, 0, sizeof(vmm_debug_counters.ept_page));
+    memset(vmm_debug_counters.ept_page_count, 0, sizeof(vmm_debug_counters.ept_page_count));
 }
 
 #define PHYSICAL_PCI_DEVICE_OWNER_NONE   0
@@ -563,7 +711,7 @@ void pre_init(void)
 {
     int error;
 
-    set_putchar(putchar_putchar);
+    set_putchar(vmm_console_diag_putchar);
 
     /* Camkes adds nothing to our address space, so this array is empty */
     void *existing_frames[] = {
