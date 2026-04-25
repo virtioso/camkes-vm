@@ -39,6 +39,7 @@
 #include <platsupport/arch/tsc.h>
 
 #include "timers.h"
+#include "console_frame_transport.h"
 #include "virtio_irq.h"
 
 extern vm_t vm;
@@ -409,7 +410,7 @@ static void serial_xmit(void *opaque)
     } else {
         /* skip all the layers ouf C abstraction and just call the camkes
          * component directly */
-        guest_putchar_putchar(s->tsr);
+        vmm_console_guest_putchar(s->tsr);
         s->chars_sent++;
         s->tsr_retry = 0;
     }
