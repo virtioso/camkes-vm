@@ -69,6 +69,10 @@ static void console_transport_emit_frame_byte(
 
 void vmm_console_diag_putchar(int c)
 {
+#ifdef VMM_CONSOLE_DROP_DIAG_OUTPUT
+    (void)c;
+    return;
+#else
     uint64_t start = console_transport_cycles_now();
     console_transport_emit_frame_byte(
         console_transport_emit_debug_raw,
@@ -79,6 +83,7 @@ void vmm_console_diag_putchar(int c)
     vmm_console_transport_stats.diag_payload_bytes++;
     vmm_console_transport_stats.diag_wire_bytes += 11;
     vmm_console_transport_stats.diag_cycles += console_transport_cycles_now() - start;
+#endif
 }
 
 void vmm_console_debug_putchar(int c)
@@ -113,12 +118,17 @@ void vmm_console_guest_putchar(int c)
 
 void vmm_console_diag_putchar(int c)
 {
+#ifdef VMM_CONSOLE_DROP_DIAG_OUTPUT
+    (void)c;
+    return;
+#else
     uint64_t start = console_transport_cycles_now();
     console_transport_emit_debug_raw((uint8_t)c);
     vmm_console_transport_stats.diag_calls++;
     vmm_console_transport_stats.diag_payload_bytes++;
     vmm_console_transport_stats.diag_wire_bytes++;
     vmm_console_transport_stats.diag_cycles += console_transport_cycles_now() - start;
+#endif
 }
 
 void vmm_console_debug_putchar(int c)
