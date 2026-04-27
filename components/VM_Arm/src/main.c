@@ -190,6 +190,12 @@ char **WEAK camkes_dtb_get_node_paths(int *num_nodes);
 char **WEAK camkes_dtb_get_plat_keep_devices(int *num_nodes);
 char **WEAK camkes_dtb_get_plat_keep_devices_and_subtree(int *num_nodes);
 
+int WEAK physical_pci_host_bridge_get_page_bits(uintptr_t paddr)
+{
+    (void)paddr;
+    return 0;
+}
+
 #ifdef CONFIG_ARM_SMMU
 seL4_CPtr camkes_get_smmu_cb_cap();
 seL4_CPtr camkes_get_smmu_sid_cap();
