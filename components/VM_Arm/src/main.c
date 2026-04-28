@@ -6,6 +6,8 @@
  */
 #define ZF_LOG_LEVEL ZF_LOG_INFO
 
+#include <utils/zf_log.h>
+
 #include <autoconf.h>
 #include <sel4muslcsys/gen_config.h>
 
@@ -992,37 +994,73 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
     seL4_Word dtb;
     int err;
 
+    ZF_LOGI("load_vm_images: begin instance=%s kernel=%s initrd=%s dtb=%s",
+            get_instance_name(),
+            vm_config->files.kernel ? vm_config->files.kernel : "(null)",
+            vm_config->files.initrd ? vm_config->files.initrd : "(null)",
+            vm_config->files.dtb ? vm_config->files.dtb : "(null)");
+    ZF_LOGI("load_vm_images: ram base=0x%lx phys_base=0x%lx size=0x%lx dtb_addr=0x%lx initrd_addr=0x%lx",
+            (unsigned long)vm_config->ram.base,
+            (unsigned long)vm_config->ram.phys_base,
+            (unsigned long)vm_config->ram.size,
+            (unsigned long)vm_config->dtb_addr,
+            (unsigned long)vm_config->initrd_addr);
+    ZF_LOGI("load_vm_images: flags generate_dtb=%d provide_dtb=%d provide_initrd=%d",
+            vm_config->generate_dtb,
+            vm_config->provide_dtb,
+            vm_config->provide_initrd);
+
     /* Load kernel */
+    ZF_LOGI("load_vm_images: loading kernel");
     printf("Loading Kernel: \'%s\'\n", vm_config->files.kernel);
     guest_kernel_image_t kernel_image_info;
     err = vm_load_guest_kernel(vm, vm_config->files.kernel, vm_config->ram.base,
                                0, &kernel_image_info);
     entry = kernel_image_info.kernel_image.load_paddr;
     if (!entry || err) {
+        ZF_LOGE("load_vm_images: kernel load failed err=%d entry=0x%lx",
+                err, (unsigned long)entry);
         return -1;
     }
+    ZF_LOGI("load_vm_images: kernel loaded entry=0x%lx size=0x%lx",
+            (unsigned long)entry,
+            (unsigned long)kernel_image_info.kernel_image.size);
 
     /* generate a chosen node */
     if (vm_config->generate_dtb) {
+        ZF_LOGI("load_vm_images: generating chosen node stdout=%s cmdline=%s vcpus=%d",
+                vm_config->kernel_stdout ? vm_config->kernel_stdout : "(null)",
+                vm_config->kernel_bootcmdline ? vm_config->kernel_bootcmdline : "(null)",
+                NUM_VCPUS);
         err = fdt_generate_chosen_node(gen_dtb_buf, vm_config->kernel_stdout,
                                        vm_config->kernel_bootcmdline, NUM_VCPUS);
         if (err) {
             ZF_LOGE("Couldn't generate chosen_node (%d)", err);
             return -1;
         }
+        ZF_LOGI("load_vm_images: chosen node generated");
     }
 
     /* Attempt to load initrd if provided */
     guest_image_t initrd_image;
     if (vm_config->provide_initrd) {
+        ZF_LOGI("load_vm_images: loading initrd");
         printf("Loading Initrd: \'%s\'\n", vm_config->files.initrd);
         err = vm_load_guest_module(vm, vm_config->files.initrd,
                                    vm_config->initrd_addr, 0, &initrd_image);
         void *initrd = (void *)initrd_image.load_paddr;
         if (!initrd || err) {
+            ZF_LOGE("load_vm_images: initrd load failed err=%d load_paddr=0x%lx",
+                    err, (unsigned long)initrd_image.load_paddr);
             return -1;
         }
+        ZF_LOGI("load_vm_images: initrd loaded load_paddr=0x%lx size=0x%lx",
+                (unsigned long)initrd_image.load_paddr,
+                (unsigned long)initrd_image.size);
         if (vm_config->generate_dtb) {
+            ZF_LOGI("load_vm_images: appending initrd info to chosen node addr=0x%lx size=0x%lx",
+                    (unsigned long)vm_config->initrd_addr,
+                    (unsigned long)initrd_image.size);
             err = fdt_append_chosen_node_with_initrd_info(gen_dtb_buf,
                                                           vm_config->initrd_addr,
                                                           initrd_image.size);
@@ -1030,6 +1068,7 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
                 ZF_LOGE("Couldn't generate chosen_node_with_initrd_info (%d)", err);
                 return -1;
             }
+            ZF_LOGI("load_vm_images: initrd info appended to chosen node");
         }
     }
 
@@ -1038,19 +1077,27 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
                    "provide_dtb and generate_dtb are both set. The provided dtb will NOT be loaded");
 
         /* Platform-specific DTB customization hook */
+        ZF_LOGI("load_vm_images: customizing generated DTB");
         err = fdt_plat_customize(vm, gen_dtb_buf);
         if (err) {
             ZF_LOGE("fdt_plat_customize() failed (%d)", err);
             return -1;
         }
+        ZF_LOGI("load_vm_images: generated DTB customized");
 
         fdt_pack(gen_dtb_buf);
+        ZF_LOGI("load_vm_images: generated DTB packed total_size=%d", fdt_totalsize(gen_dtb_buf));
         printf("Loading Generated DTB\n");
         vm_ram_mark_allocated(vm, vm_config->dtb_addr, sizeof(gen_dtb_buf));
+        ZF_LOGI("load_vm_images: marked DTB RAM allocated addr=0x%lx size=0x%lx",
+                (unsigned long)vm_config->dtb_addr,
+                (unsigned long)sizeof(gen_dtb_buf));
         vm_ram_touch(vm, vm_config->dtb_addr, sizeof(gen_dtb_buf), load_generated_dtb,
                      gen_dtb_buf);
         dtb = vm_config->dtb_addr;
+        ZF_LOGI("load_vm_images: generated DTB loaded dtb=0x%lx", (unsigned long)dtb);
     } else if (vm_config->provide_dtb) {
+        ZF_LOGI("load_vm_images: loading provided DTB");
         printf("Loading DTB: \'%s\'\n", vm_config->files.dtb);
 
         /* Load device tree */
@@ -1059,19 +1106,28 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
                                    vm_config->dtb_addr, 0, &dtb_image);
         dtb = dtb_image.load_paddr;
         if (!dtb || err) {
+            ZF_LOGE("load_vm_images: provided DTB load failed err=%d load_paddr=0x%lx",
+                    err, (unsigned long)dtb);
             return -1;
         }
+        ZF_LOGI("load_vm_images: provided DTB loaded dtb=0x%lx size=0x%lx",
+                (unsigned long)dtb,
+                (unsigned long)dtb_image.size);
     } else {
         ZF_LOGW("%s not given a DTB - This may be appropriate for your guest, but it " \
                 "may also break things!", get_instance_name());
     }
 
     /* Set boot arguments */
+    ZF_LOGI("load_vm_images: setting bootargs entry=0x%lx mach_type=%d dtb=0x%lx",
+            (unsigned long)entry, MACH_TYPE, (unsigned long)dtb);
     err = vcpu_set_bootargs(vm->vcpus[BOOT_VCPU], entry, MACH_TYPE, dtb);
     if (err) {
         printf("Error: Failed to set boot arguments\n");
+        ZF_LOGE("load_vm_images: vcpu_set_bootargs failed err=%d", err);
         return -1;
     }
+    ZF_LOGI("load_vm_images: complete");
 
     return 0;
 }
