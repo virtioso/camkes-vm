@@ -125,6 +125,5 @@ const vm_config_t vm_config = {
 
 };
 
-const int guest_large_pages = /*? config.get('guest_large_pages', false) ?*/;
 const unsigned long ram_base = vm_config.ram.base;
 const unsigned long ram_size = vm_config.ram.size;
