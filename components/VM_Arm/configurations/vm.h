@@ -67,6 +67,7 @@
     attribute int num_vcpus = 1; \
     attribute int num_extra_frame_caps; \
     attribute int extra_frame_map_address; \
+    attribute int guest_large_pages = false; \
     attribute { \
         string ram_base; \
         string ram_paddr_base; \
@@ -168,4 +169,3 @@
 #define VM_VIRTUAL_SERIAL_CONFIGURATION_DEF(vm_ids...) \
     VM_VIRTUAL_SERIAL_GENERAL_CONFIGURATION_DEF() \
     __CALL(PER_VM_VIRTUAL_SERIAL_CONFIGURATION_DEF, vm_ids) \
-
