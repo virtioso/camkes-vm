@@ -167,9 +167,12 @@ static bool vm_gicv3_irq_trace_match(int irq)
 static void vm_gicv3_irq_trace(const char *event, int irq, int rc,
                                unsigned long *counter)
 {
-    unsigned long count = ++(*counter);
+    if (!vm_gicv3_irq_trace_match(irq)) {
+        return;
+    }
 
-    if (!vm_gicv3_irq_trace_match(irq) || !trace_counter_should_log(count)) {
+    unsigned long count = ++(*counter);
+    if (!trace_counter_should_log(count)) {
         return;
     }
 
@@ -951,6 +954,7 @@ static int route_irq(int irq_num, vm_vcpu_t *vcpu, irq_server_t *irq_server)
 {
     ps_irq_t irq = { .type = PS_INTERRUPT, .irq = { .number = irq_num }};
     irq_callback_fn_t handler = NULL;
+    static unsigned long route_count;
     if (get_custom_irq_handler) {
         handler = get_custom_irq_handler(irq);
     }
@@ -965,8 +969,10 @@ static int route_irq(int irq_num, vm_vcpu_t *vcpu, irq_server_t *irq_server)
 
     int err = vm_register_irq(vcpu, irq.irq.number, &do_irq_server_ack, token);
     if (err == -1) {
+        vm_gicv3_irq_trace("route-register", irq.irq.number, err, &route_count);
         return -1;
     }
+    vm_gicv3_irq_trace("route-register", irq.irq.number, err, &route_count);
 
     token->virq = irq.irq.number;
     token->irq = irq;
