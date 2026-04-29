@@ -129,6 +129,14 @@ config_option(
 )
 
 config_option(
+    VmImageLoadTiming
+    VM_IMAGE_LOAD_TIMING
+    "Emit one timing line per VM image-loading step. Intended for diagnosing slow pre-kernel guest loading."
+    DEFAULT
+    OFF
+)
+
+config_option(
     VmVirtUart
     VM_VIRT_UART
     "Option for virtualizing console"

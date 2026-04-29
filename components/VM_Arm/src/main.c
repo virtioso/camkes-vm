@@ -13,6 +13,8 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 #include <setjmp.h>
 #include <sys/types.h>
@@ -77,6 +79,68 @@ seL4_CPtr camkes_alloc(seL4_ObjectType type, size_t size, unsigned flags);
 
 extern void *fs_buf;
 int start_extra_frame_caps;
+
+#if defined(CONFIG_VM_IMAGE_LOAD_TIMING) && CONFIG_VM_IMAGE_LOAD_TIMING
+static uint64_t vm_image_load_counter(void)
+{
+#if defined(__aarch64__)
+    uint64_t counter;
+    asm volatile("mrs %0, cntpct_el0" : "=r"(counter));
+    return counter;
+#else
+    return 0;
+#endif
+}
+
+static uint64_t vm_image_load_counter_freq(void)
+{
+#if defined(__aarch64__)
+    uint64_t freq;
+    asm volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+    return freq;
+#else
+    return 0;
+#endif
+}
+
+static void vm_image_load_timing_report(const char *phase, const char *image,
+                                        uint64_t start, size_t bytes,
+                                        int err, bool clean_cache)
+{
+    uint64_t end = vm_image_load_counter();
+    uint64_t cycles = end - start;
+    uint64_t freq = vm_image_load_counter_freq();
+    uint64_t usec = freq ? (cycles * 1000000ULL) / freq : 0;
+
+    ZF_LOGI("VM_IMAGE_LOAD_TIMING instance=%s phase=%s image=%s bytes=%lu cycles=%llu freq=%llu usec=%llu err=%d clean_cache=%d",
+            get_instance_name(),
+            phase ? phase : "(null)",
+            image ? image : "(null)",
+            (unsigned long)bytes,
+            (unsigned long long)cycles,
+            (unsigned long long)freq,
+            (unsigned long long)usec,
+            err,
+            clean_cache ? 1 : 0);
+}
+#else
+static inline uint64_t vm_image_load_counter(void)
+{
+    return 0;
+}
+
+static inline void vm_image_load_timing_report(const char *phase, const char *image,
+                                               uint64_t start, size_t bytes,
+                                               int err, bool clean_cache)
+{
+    (void)phase;
+    (void)image;
+    (void)start;
+    (void)bytes;
+    (void)err;
+    (void)clean_cache;
+}
+#endif
 
 int VM_PRIO = 100;
 int NUM_VCPUS = 1;
@@ -1013,9 +1077,13 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
     /* Load kernel */
     ZF_LOGI("load_vm_images: loading kernel");
     printf("Loading Kernel: \'%s\'\n", vm_config->files.kernel);
-    guest_kernel_image_t kernel_image_info;
+    uint64_t load_start = vm_image_load_counter();
+    guest_kernel_image_t kernel_image_info = {0};
     err = vm_load_guest_kernel(vm, vm_config->files.kernel, vm_config->ram.base,
                                0, &kernel_image_info);
+    vm_image_load_timing_report("kernel", vm_config->files.kernel, load_start,
+                                kernel_image_info.kernel_image.size, err,
+                                vm->mem.clean_cache);
     entry = kernel_image_info.kernel_image.load_paddr;
     if (!entry || err) {
         ZF_LOGE("load_vm_images: kernel load failed err=%d entry=0x%lx",
@@ -1042,12 +1110,15 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
     }
 
     /* Attempt to load initrd if provided */
-    guest_image_t initrd_image;
+    guest_image_t initrd_image = {0};
     if (vm_config->provide_initrd) {
         ZF_LOGI("load_vm_images: loading initrd");
         printf("Loading Initrd: \'%s\'\n", vm_config->files.initrd);
+        load_start = vm_image_load_counter();
         err = vm_load_guest_module(vm, vm_config->files.initrd,
                                    vm_config->initrd_addr, 0, &initrd_image);
+        vm_image_load_timing_report("initrd", vm_config->files.initrd, load_start,
+                                    initrd_image.size, err, vm->mem.clean_cache);
         void *initrd = (void *)initrd_image.load_paddr;
         if (!initrd || err) {
             ZF_LOGE("load_vm_images: initrd load failed err=%d load_paddr=0x%lx",
@@ -1092,8 +1163,11 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
         ZF_LOGI("load_vm_images: marked DTB RAM allocated addr=0x%lx size=0x%lx",
                 (unsigned long)vm_config->dtb_addr,
                 (unsigned long)sizeof(gen_dtb_buf));
-        vm_ram_touch(vm, vm_config->dtb_addr, sizeof(gen_dtb_buf), load_generated_dtb,
-                     gen_dtb_buf);
+        load_start = vm_image_load_counter();
+        err = vm_ram_touch(vm, vm_config->dtb_addr, sizeof(gen_dtb_buf), load_generated_dtb,
+                           gen_dtb_buf);
+        vm_image_load_timing_report("generated_dtb", "(generated)", load_start,
+                                    sizeof(gen_dtb_buf), err, vm->mem.clean_cache);
         dtb = vm_config->dtb_addr;
         ZF_LOGI("load_vm_images: generated DTB loaded dtb=0x%lx", (unsigned long)dtb);
     } else if (vm_config->provide_dtb) {
@@ -1101,9 +1175,12 @@ static int load_vm_images(vm_t *vm, const vm_config_t *vm_config)
         printf("Loading DTB: \'%s\'\n", vm_config->files.dtb);
 
         /* Load device tree */
-        guest_image_t dtb_image;
+        guest_image_t dtb_image = {0};
+        load_start = vm_image_load_counter();
         err = vm_load_guest_module(vm, vm_config->files.dtb,
                                    vm_config->dtb_addr, 0, &dtb_image);
+        vm_image_load_timing_report("dtb", vm_config->files.dtb, load_start,
+                                    dtb_image.size, err, vm->mem.clean_cache);
         dtb = dtb_image.load_paddr;
         if (!dtb || err) {
             ZF_LOGE("load_vm_images: provided DTB load failed err=%d load_paddr=0x%lx",
