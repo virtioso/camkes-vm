@@ -137,6 +137,26 @@ config_option(
 )
 
 config_option(
+    VmGicV3IrqTrace
+    VM_GICV3_IRQ_TRACE
+    "Trace selected physical IRQ route and ACK events in the Arm VM component"
+    DEFAULT
+    OFF
+    DEPENDS
+    "KernelArchARM;KernelArmGicV3"
+)
+
+config_string(
+    VmGicV3IrqTraceIrq
+    VM_GICV3_IRQ_TRACE_IRQ
+    "Virtual IRQ number traced by VM_GICV3_IRQ_TRACE"
+    DEFAULT
+    178
+    DEPENDS
+    "VmGicV3IrqTrace"
+)
+
+config_option(
     VmVirtUart
     VM_VIRT_UART
     "Option for virtualizing console"

@@ -142,6 +142,57 @@ static inline void vm_image_load_timing_report(const char *phase, const char *im
 }
 #endif
 
+static bool trace_counter_should_log(unsigned long count)
+{
+    return count <= 16 || (count & (count - 1)) == 0;
+}
+
+#if defined(CONFIG_VM_GICV3_IRQ_TRACE) && CONFIG_VM_GICV3_IRQ_TRACE
+static int vm_gicv3_irq_trace_irq(void)
+{
+    static int trace_irq = -1;
+
+    if (trace_irq < 0) {
+        trace_irq = atoi(CONFIG_VM_GICV3_IRQ_TRACE_IRQ);
+    }
+
+    return trace_irq;
+}
+
+static bool vm_gicv3_irq_trace_match(int irq)
+{
+    return irq == vm_gicv3_irq_trace_irq();
+}
+
+static void vm_gicv3_irq_trace(const char *event, int irq, int rc,
+                               unsigned long *counter)
+{
+    unsigned long count = ++(*counter);
+
+    if (!vm_gicv3_irq_trace_match(irq) || !trace_counter_should_log(count)) {
+        return;
+    }
+
+    ZF_LOGI("VM_GICV3_IRQ_TRACE instance=%s event=%s irq=%d count=%lu rc=%d",
+            get_instance_name(), event, irq, count, rc);
+}
+#else
+static inline bool vm_gicv3_irq_trace_match(int irq)
+{
+    (void)irq;
+    return false;
+}
+
+static inline void vm_gicv3_irq_trace(const char *event, int irq, int rc,
+                                      unsigned long *counter)
+{
+    (void)event;
+    (void)irq;
+    (void)rc;
+    (void)counter;
+}
+#endif
+
 int VM_PRIO = 100;
 int NUM_VCPUS = 1;
 
@@ -790,6 +841,9 @@ static void do_irq_server_ack(vm_vcpu_t *vcpu, int irq, void *token)
 {
     assert(token);
     irq_token_t irq_token = token;
+    static unsigned long ack_count;
+    static unsigned long ack_skip_count;
+
     /* If the acknowledge function pointer is NULL, this means that the actual
      * interrupt has not arrived/we have not handled it. So we defer it for
      * later.
@@ -798,8 +852,11 @@ static void do_irq_server_ack(vm_vcpu_t *vcpu, int irq, void *token)
      * an EOI from Linux before we inject the VIRQ */
     if (irq_token->acknowledge_fn && irq_token->ack_data) {
         int err = irq_token->acknowledge_fn(irq_token->ack_data);
+        vm_gicv3_irq_trace("physical-ack", irq, err, &ack_count);
         assert(!err);
         irq_token->ack_data = NULL;
+    } else if (vm_gicv3_irq_trace_match(irq)) {
+        vm_gicv3_irq_trace("physical-ack-deferred", irq, 0, &ack_skip_count);
     }
 }
 
@@ -812,7 +869,12 @@ static void irq_handler(void *data, ps_irq_acknowledge_fn_t acknowledge_fn, void
     token->acknowledge_fn = acknowledge_fn;
     token->ack_data = ack_data;
     int err;
+    static unsigned long arrive_count;
+    static unsigned long inject_count;
+
+    vm_gicv3_irq_trace("physical-arrive", token->virq, 0, &arrive_count);
     err = vm_inject_irq(token->vm->vcpus[BOOT_VCPU], token->virq);
+    vm_gicv3_irq_trace("inject-return", token->virq, err, &inject_count);
     if (err) {
         ZF_LOGW("IRQ %d Dropped", token->virq);
     }
