@@ -6,6 +6,8 @@
 
 /*The init thread for the vmm system*/
 
+#define ZF_LOG_LEVEL ZF_LOG_INFO
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
@@ -1510,14 +1512,21 @@ void *main_continued(void *arg)
 
     early_debug_puts("\n[vmm-early] main_continued\n");
 
+    early_debug_puts("[vmm-early] before rtc\n");
     rtc_time_date_t time_date = system_rtc_time_date();
+    early_debug_puts("[vmm-early] after rtc\n");
     ZF_LOGI("Starting VM %s at: %04d:%02d:%02d %02d:%02d:%02d\n", get_instance_name(), time_date.year, time_date.month,
             time_date.day, time_date.hour, time_date.minute, time_date.second);
+    early_debug_puts("[vmm-early] after start log\n");
 
+    early_debug_puts("[vmm-early] before pci ops\n");
     pci_io_ops = make_pci_io_ops();
+    early_debug_puts("[vmm-early] after pci ops\n");
 
     ZF_LOGI("PCI scan");
+    early_debug_puts("[vmm-early] before pci scan\n");
     libpci_scan(pci_io_ops);
+    early_debug_puts("[vmm-early] after pci scan\n");
     for (uint32_t pci_idx = 0; pci_idx < libpci_num_devices; pci_idx++) {
         libpci_device_t *device = &libpci_device_list[pci_idx];
         ZF_LOGE(
@@ -1549,16 +1558,24 @@ void *main_continued(void *arg)
 
     /* install custom open/close/read implementations to redirect I/O from the VMM to
      * our file server */
+    early_debug_puts("[vmm-early] before fileserver\n");
     install_fileserver(FILE_SERVER_INTERFACE(fs));
+    early_debug_puts("[vmm-early] after fileserver\n");
 
+    early_debug_puts("[vmm-early] before malloc ops\n");
     error = ps_new_stdlib_malloc_ops(&io_ops.malloc_ops);
     ZF_LOGF_IF(error, "malloc ops init failed");
+    early_debug_puts("[vmm-early] after malloc ops\n");
 
+    early_debug_puts("[vmm-early] before ready cap\n");
     seL4_CPtr ready_notification_cap = intready_notification();
+    early_debug_puts("[vmm-early] after ready cap\n");
     /* Construct a new VM */
     ZF_LOGI("VMM init");
+    early_debug_puts("[vmm-early] before vm_init\n");
     error = vm_init(&vm, &vka, &camkes_simple, vspace, &io_ops, ready_notification_cap, "X86 VM");
     ZF_LOGF_IF(error, "VMM init failed");
+    early_debug_puts("[vmm-early] after vm_init\n");
 
 #ifdef CONFIG_CAMKES_VM_GUEST_DMA_IOMMU
     /* Do early device discovery and find any relevant PCI busses that
