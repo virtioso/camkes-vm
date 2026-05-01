@@ -1908,41 +1908,49 @@ void *main_continued(void *arg)
     /* Allocate guest ram. This is the main memory that the guest will actually get
      * told exists. Other memory may get allocated and mapped into the guest */
     early_debug_puts("[vmm-early] before guest ram\n");
-    bool paddr_is_vaddr;
-    paddr_is_vaddr = false;
-    // allocate guest ram in 512MiB chunks. This prevents extreme fragmentation of the
-    // physical address space when a large amount of guest RAM has been reuqested.
-    // An important side affect is that if the requested RAM is large, and there are
-    // devices or other regions in the lower 4GiB of the guest address space then we will
-    // still allocate some RAM in the lower 4GiB, which a guest may require to run correctly.
-    size_t remaining = MiB_TO_BYTES(guest_ram_mb);
-    early_debug_puts("[vmm-early] guest ram vm=");
-    early_debug_puts(vm_name ? vm_name : "unknown");
-    early_debug_puts(" total=");
-    early_debug_putuint(remaining);
-    early_debug_puts(" large_pages=");
-    early_debug_putuint(guest_large_pages);
-    early_debug_puts("\n");
-    while (remaining > 0) {
-        size_t allocate = MIN(remaining, MiB_TO_BYTES(512));
-        early_debug_puts("[vmm-early] guest ram register vm=");
+    vmm_module_t *init_ram = vmm_module_find_by_name("init_ram");
+    if (init_ram) {
+        early_debug_puts("[vmm-early] guest ram module init_ram\n");
+        error = vmm_module_init(init_ram, &vm);
+        ZF_LOGF_IF(error, "Failed to initialise init_ram module");
+    } else {
+        bool paddr_is_vaddr;
+        paddr_is_vaddr = false;
+        // allocate guest ram in 512MiB chunks. This prevents extreme fragmentation of the
+        // physical address space when a large amount of guest RAM has been reuqested.
+        // An important side affect is that if the requested RAM is large, and there are
+        // devices or other regions in the lower 4GiB of the guest address space then we will
+        // still allocate some RAM in the lower 4GiB, which a guest may require to run correctly.
+        size_t remaining = MiB_TO_BYTES(guest_ram_mb);
+        early_debug_puts("[vmm-early] guest ram vm=");
         early_debug_puts(vm_name ? vm_name : "unknown");
-        early_debug_puts(" allocate=");
-        early_debug_putuint(allocate);
-        early_debug_puts(" remaining_before=");
+        early_debug_puts(" total=");
         early_debug_putuint(remaining);
+        early_debug_puts(" large_pages=");
+        early_debug_putuint(guest_large_pages);
         early_debug_puts("\n");
-        uintptr_t res_addr = vm_ram_register(&vm, allocate);
-        early_debug_puts("[vmm-early] guest ram registered vm=");
-        early_debug_puts(vm_name ? vm_name : "unknown");
-        early_debug_puts(" gpa=");
-        early_debug_puthex(res_addr);
-        early_debug_puts(" remaining_after=");
-        early_debug_putuint(remaining - allocate);
-        early_debug_puts("\n");
-        ZF_LOGF_IF(!res_addr, "Failed to allocate %lu bytes of guest ram. Already allocated %lu.",
-                   (long)allocate, (long)(MiB_TO_BYTES(guest_ram_mb) - remaining));
-        remaining -= allocate;
+        while (remaining > 0) {
+            size_t allocate = MIN(remaining, MiB_TO_BYTES(512));
+            early_debug_puts("[vmm-early] guest ram register vm=");
+            early_debug_puts(vm_name ? vm_name : "unknown");
+            early_debug_puts(" allocate=");
+            early_debug_putuint(allocate);
+            early_debug_puts(" remaining_before=");
+            early_debug_putuint(remaining);
+            early_debug_puts("\n");
+            uintptr_t res_addr = vm_ram_register(&vm, allocate);
+            early_debug_puts("[vmm-early] guest ram registered vm=");
+            early_debug_puts(vm_name ? vm_name : "unknown");
+            early_debug_puts(" gpa=");
+            early_debug_puthex(res_addr);
+            early_debug_puts(" remaining_after=");
+            early_debug_putuint(remaining - allocate);
+            early_debug_puts("\n");
+            ZF_LOGF_IF(!is_ram_region(&vm, res_addr, allocate),
+                       "Failed to allocate %lu bytes of guest ram. Already allocated %lu.",
+                       (long)allocate, (long)(MiB_TO_BYTES(guest_ram_mb) - remaining));
+            remaining -= allocate;
+        }
     }
     early_debug_puts("[vmm-early] after guest ram\n");
 
