@@ -6,7 +6,9 @@
  */
 
 #include <camkes.h>
+#if __has_include(<arm_vm/gen_config.h>)
 #include <arm_vm/gen_config.h>
+#endif
 
 /*- set config = configuration[me.name] -*/
 /*- if not config -*/
@@ -42,6 +44,18 @@ const vm_config_t vm_config = {
     .entry_addr = /*? vm_address_config.get('ram_base') ?*/ + /*? '0x%x'%entry_offset ?*/,
 /*- endif -*/
 
+/*- elif config.get('guest_ram_mb') is not none -*/
+
+    .ram = {
+        .phys_base = 0,
+        .base = 0,
+        .size = (/*? config.get('guest_ram_mb') ?*/ULL * 1024ULL * 1024ULL),
+    },
+
+    .dtb_addr = 0,
+    .initrd_addr = 0,
+    .entry_addr = 0,
+
 /*- else -*/
 
 #warning You are using the deprecated linux_address_config structure. Please use the vm_address_config structure instead
@@ -76,6 +90,24 @@ const vm_config_t vm_config = {
 
     .kernel_bootcmdline = "/*? vm_image_config.get('kernel_bootcmdline', "") ?*/",
     .kernel_stdout = "/*? vm_image_config.get('kernel_stdout', "") ?*/",
+
+/*- elif config.get('kernel_image') is not none -*/
+
+    .provide_initrd = /*? 1 if config.get('initrd_image', '') else 0 ?*/,
+    .generate_dtb = 0,
+    .provide_dtb = 0,
+    .map_one_to_one = 0,
+    .clean_cache = 0,
+
+    .files = {
+        .kernel = "/*? config.get('kernel_image') ?*/",
+        .initrd = "/*? config.get('initrd_image', '') ?*/",
+        .dtb = "",
+        .dtb_base = "",
+    },
+
+    .kernel_bootcmdline = "/*? config.get('kernel_cmdline', '') ?*/",
+    .kernel_stdout = "",
 
 /*- else -*/
 

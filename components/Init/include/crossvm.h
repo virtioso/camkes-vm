@@ -11,19 +11,11 @@
 
 #include <camkes/dataport_caps.h>
 
-struct camkes_consumes_event {
-    vm_t *vm;
-    unsigned int id;
-    int (*reg_callback)(event_callback_fn, void *arg);
-    seL4_CPtr irq_notification;
-};
-
 struct camkes_crossvm_connection {
-    /* Data-plane dataport (legacy and split modes). */
     dataport_caps_handle_t *handle;
     emit_fn emit_fn;
-    struct camkes_consumes_event consume_event;
-    /* Optional control-plane dataport (split mode). */
+    seL4_Word consume_badge;
+    const char *connection_name;
     dataport_caps_handle_t *control_handle;
 };
 
@@ -38,4 +30,4 @@ struct camkes_crossvm_connection {
  * @return -1 for error, otherwise 0 for success
  */
 int cross_vm_connections_init(vm_t *vm, uintptr_t connection_base_addr, struct camkes_crossvm_connection *connections,
-                              int num_connections, vmm_pci_space_t *pci, seL4_CPtr irq_notification);
+                              int num_connections);

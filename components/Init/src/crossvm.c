@@ -14,19 +14,18 @@
 #include <sel4vmmplatsupport/drivers/pci_helper.h>
 
 extern int get_crossvm_irq_num(void);
-
-static void event_camkes_callback(void *arg)
-{
-    struct camkes_crossvm_connection *conn = arg;
-    consume_connection_event(conn->consume_event.vm, conn->consume_event.id, false);
-    seL4_Signal(conn->consume_event.irq_notification);
-    int err = conn->consume_event.reg_callback(event_camkes_callback, conn);
-    assert(!err);
-}
+extern vmm_pci_space_t *pci;
+extern seL4_CPtr create_async_event_notification_cap(vm_t *vm, seL4_Word badge);
 
 int cross_vm_connections_init(vm_t *vm, uintptr_t connection_base_addr, struct camkes_crossvm_connection *connections,
-                              int num_connections, vmm_pci_space_t *pci, seL4_CPtr irq_notification)
+                              int num_connections)
 {
+    seL4_CPtr irq_notification = create_async_event_notification_cap(vm, BIT(27) | BIT(get_crossvm_irq_num()));
+    if (irq_notification == seL4_CapNull) {
+        ZF_LOGE("Failed to create cross-vm async event notification cap");
+        return -1;
+    }
+
     crossvm_handle_t *crossvm_connections = calloc(num_connections, sizeof(crossvm_handle_t));
     if (!crossvm_connections) {
         return -1;
@@ -43,17 +42,11 @@ int cross_vm_connections_init(vm_t *vm, uintptr_t connection_base_addr, struct c
         data_dp_handle->num_frames = handle->get_num_frame_caps();
         data_dp_handle->frames = handle->get_frame_caps();
 
-        /* Initialise consume event connection callbacks */
-        if (connections[i].consume_event.reg_callback) {
-            connections[i].consume_event.irq_notification = irq_notification;
-            connections[i].consume_event.reg_callback(event_camkes_callback, &connections[i]);
-        }
-
         /* Initialise crossvm connection */
         crossvm_connections[i].dataport = data_dp_handle;
         crossvm_connections[i].control_dataport = NULL;
         crossvm_connections[i].emit_fn = connections[i].emit_fn;
-        crossvm_connections[i].consume_id = (seL4_Word)connections[i].consume_event.id;
+        crossvm_connections[i].consume_id = connections[i].consume_badge;
 
         if (connections[i].control_handle) {
             crossvm_dataport_handle_t *control_dp_handle = calloc(1, sizeof(crossvm_dataport_handle_t));

@@ -30,6 +30,7 @@
 #include <camkes.h>
 
 #include "camkes_vm_interfaces.h"
+#include <vmlinux.h>
 #include <sel4vm/guest_vm.h>
 #include <sel4vm/boot.h>
 #include <sel4vm/guest_memory.h>
@@ -95,13 +96,13 @@ static char allocator_mempool[8886080];
 static simple_t camkes_simple;
 static seL4_Error (*camkes_original_frame_cap)(void *data, void *paddr, int size_bits,
                                                cspacepath_t *path);
-static vka_t vka;
+vka_t _vka;
 static vspace_t vspace;
 static sel4utils_alloc_data_t vspace_data;
 struct ps_io_ops io_ops;
-static vmm_pci_space_t *pci;
+vmm_pci_space_t *pci;
 static vmm_pci_raw_io_space_t *physical_pci_raw_io;
-static vmm_io_port_list_t *io_ports;
+vmm_io_port_list_t *io_ports;
 
 vm_t vm;
 
@@ -451,6 +452,90 @@ extern int camkes_get_untyped_page_bits(uintptr_t addr);
 int camkes_cross_vm_connections_init(vm_t *vm, vmm_pci_space_t *pci,
                                      seL4_CPtr irq_notification, uintptr_t connection_base_address) WEAK;
 
+/* Force the _vmm_module section to exist even when no virtioso modules are generated. */
+static USED SECTION("_vmm_module") struct {} dummy_module;
+extern vmm_module_t *__start__vmm_module[];
+extern vmm_module_t *__stop__vmm_module[];
+
+static int init_modules(vm_t *vm, vmm_module_t **start, vmm_module_t **stop)
+{
+    for (vmm_module_t **m = start; m < stop; m++) {
+        int err = vmm_module_init(*m, vm);
+        if (err) {
+            ZF_LOGE("vmm_module_init() failed (%d)", err);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static vmm_module_t *vmm_module_find_by_name(const char *name)
+{
+    for (vmm_module_t **m = __start__vmm_module; m < __stop__vmm_module; m++) {
+        if (!strcmp((*m)->name, name)) {
+            return *m;
+        }
+    }
+
+    return NULL;
+}
+
+int vmm_module_init_by_name(const char *name, void *cookie)
+{
+    vmm_module_t *m = vmm_module_find_by_name(name);
+    if (!m) {
+        ZF_LOGE("module %s not found", name);
+        return -1;
+    }
+
+    return vmm_module_init(m, cookie);
+}
+
+int vmm_module_init(vmm_module_t *m, void *cookie)
+{
+    vm_t *module_vm = cookie;
+
+    if (!m) {
+        return -1;
+    }
+    if (m->initialized) {
+        return 0;
+    }
+
+    int err = init_modules(module_vm, m->deps_start, m->deps_stop);
+    if (err) {
+        ZF_LOGE("init_modules() failed (%d)", err);
+        return -1;
+    }
+
+    ZF_LOGI("module name: %s", m->name);
+    m->init_module(module_vm, m->cookie);
+    m->initialized = true;
+
+    return 0;
+}
+
+static void x86_vpci_init_module(vm_t *vm, void *cookie)
+{
+    (void)vm;
+    (void)cookie;
+}
+
+static void x86_vpci_register_devices_module(vm_t *vm, void *cookie)
+{
+    (void)vm;
+    (void)cookie;
+}
+
+/*
+ * The x86 Init component performs PCI setup in its legacy main path. These
+ * module anchors let Virtioso-generated modules share the ARM dependency names.
+ */
+DEFINE_MODULE(vpci_init, NULL, x86_vpci_init_module)
+DEFINE_MODULE(vpci_register_devices, NULL, x86_vpci_register_devices_module)
+DEFINE_MODULE_DEP(vpci_register_devices, vpci_init)
+
 bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *bridge)
 {
     (void)vm;
@@ -732,13 +817,13 @@ static seL4_Error simple_frame_cap_wrapper(void *data, void *paddr, int size_bit
 {
     seL4_CPtr cap = pci_devices_get_device_mem_frame((uintptr_t)paddr);
     if (cap != 0) {
-        vka_cspace_make_path(&vka, cap, path);
+        vka_cspace_make_path(&_vka, cap, path);
         return 0;
     }
 
     cap = physical_pci_host_bridge_get_mem_frame((uintptr_t)paddr);
     if (cap != 0) {
-        vka_cspace_make_path(&vka, cap, path);
+        vka_cspace_make_path(&_vka, cap, path);
         return 0;
     }
 
@@ -746,7 +831,7 @@ static seL4_Error simple_frame_cap_wrapper(void *data, void *paddr, int size_bit
     cap = guest_mappings_get_mapping_mem_frame((uintptr_t)paddr);
     if (cap != 0) {
         ZF_LOGI("Guest map found at %p\n", paddr);
-        vka_cspace_make_path(&vka, cap, path);
+        vka_cspace_make_path(&_vka, cap, path);
         return 0;
     }
 
@@ -790,11 +875,11 @@ void pre_init(void)
     error = allocman_add_simple_untypeds(allocman, &camkes_simple);
     ZF_LOGF_IF(error, "Failed to add untypeds to allocman");
 
-    allocman_make_vka(&vka, allocman);
+    allocman_make_vka(&_vka, allocman);
 
     /* Initialize the vspace */
     error = sel4utils_bootstrap_vspace(&vspace, &vspace_data,
-                                       simple_get_init_cap(&camkes_simple, seL4_CapInitThreadPD), &vka, NULL, NULL, existing_frames);
+                                       simple_get_init_cap(&camkes_simple, seL4_CapInitThreadPD), &_vka, NULL, NULL, existing_frames);
     ZF_LOGF_IF(error, "Failed to bootstrap vspace");
 
     /* Create virtual pool */
@@ -823,7 +908,7 @@ void pre_init(void)
         size_t sz_size_bits;
         ram_get_untyped(i, &paddr, &size_bits, &cap);
         sz_size_bits = size_bits;
-        vka_cspace_make_path(&vka, cap, &path);
+        vka_cspace_make_path(&_vka, cap, &path);
         error = allocman_utspace_add_uts(allocman, 1, &path, &sz_size_bits, &paddr, ALLOCMAN_UT_DEV_MEM);
         ZF_LOGF_IF(error, "Failed to add device mem uts to allocman");
     }
@@ -838,7 +923,7 @@ void pre_init(void)
         seL4_CPtr cap = simple_get_nth_untyped(&camkes_simple, i, &size, &paddr, &device);
         if (device) {
             cspacepath_t path;
-            vka_cspace_make_path(&vka, cap, &path);
+            vka_cspace_make_path(&_vka, cap, &path);
             error = allocman_utspace_add_uts(allocman, 1, &path, &size, &paddr, ALLOCMAN_UT_DEV);
             ZF_LOGF_IF(error, "Failed to add MMIO uts allocman");
         }
@@ -1109,6 +1194,28 @@ ps_io_port_ops_t make_pci_io_ops()
 static int device_notify_list_len = 0;
 static device_notify_t *device_notify_list = NULL;
 
+typedef struct async_event_handler {
+    seL4_Word badge;
+    async_event_handler_fn_t callback;
+    void *cookie;
+} async_event_handler_t;
+
+static int async_event_handler_count;
+static async_event_handler_t async_event_handlers[16];
+
+int register_async_event_handler(seL4_Word badge, async_event_handler_fn_t callback, void *cookie)
+{
+    if (async_event_handler_count >= (int)ARRAY_SIZE(async_event_handlers)) {
+        return -1;
+    }
+    async_event_handlers[async_event_handler_count++] = (async_event_handler_t) {
+        .badge = badge,
+        .callback = callback,
+        .cookie = cookie,
+    };
+    return 0;
+}
+
 void pit_timer_interrupt(void);
 void rtc_timer_interrupt(uint32_t);
 void serial_timer_interrupt(uint32_t);
@@ -1250,11 +1357,17 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
                 device_notify_list[i].func(vm);
             }
         }
+        for (int i = 0; i < async_event_handler_count; i++) {
+            if ((badge & async_event_handlers[i].badge) == async_event_handlers[i].badge) {
+                ZF_LOGF_IF(async_event_handlers[i].callback == NULL, "Undefined async event handler");
+                async_event_handlers[i].callback(vm, async_event_handlers[i].cookie);
+            }
+        }
     }
     return 0;
 }
 
-static seL4_CPtr create_async_event_notification_cap(vm_t *vm, seL4_Word badge)
+seL4_CPtr create_async_event_notification_cap(vm_t *vm, seL4_Word badge)
 {
 
     if (!(badge & BIT(27))) {
@@ -1313,8 +1426,8 @@ static int bind_vm_irq_handler(vm_t *vm, seL4_CPtr irq_handler, uint8_t dest)
         return -1;
     }
 
-    vka_cspace_make_path(&vka, intready_notification(), &async_path);
-    error = vka_cspace_alloc_path(&vka, &badge_path);
+    vka_cspace_make_path(&_vka, intready_notification(), &async_path);
+    error = vka_cspace_alloc_path(&_vka, &badge_path);
     ZF_LOGF_IF(error, "Failed to alloc cspace path");
 
     error = vka_cnode_mint(&badge_path, &async_path, seL4_AllRights, irq_badges[dest]);
@@ -1430,7 +1543,7 @@ static int ensure_runtime_ioapic_irq(vm_t *vm, uint8_t ioapic, uint8_t source,
     }
 
     cspacepath_t irq_path;
-    int error = vka_cspace_alloc_path(&vka, &irq_path);
+    int error = vka_cspace_alloc_path(&_vka, &irq_path);
     if (error) {
         ZF_LOGE("Failed to alloc cspace path for runtime IOAPIC irq");
         return error;
@@ -1447,7 +1560,7 @@ static int ensure_runtime_ioapic_irq(vm_t *vm, uint8_t ioapic, uint8_t source,
     }
     if (error) {
         ZF_LOGE("Failed to allocate runtime IRQ ioapic=%u pin=%u source=%u dest=%u", ioapic, source, source, dest);
-        vka_cspace_free_path(&vka, irq_path);
+        vka_cspace_free_path(&_vka, irq_path);
         return error;
     }
 
@@ -1659,7 +1772,7 @@ void *main_continued(void *arg)
     ZF_LOGI("VMM init");
     early_debug_puts("[vmm-early] before vm_init\n");
     const char *vm_name = get_instance_name();
-    error = vm_init(&vm, &vka, &camkes_simple, vspace, &io_ops, ready_notification_cap,
+    error = vm_init(&vm, &_vka, &camkes_simple, vspace, &io_ops, ready_notification_cap,
                     vm_name ? vm_name : "unknown");
     ZF_LOGF_IF(error, "VMM init failed");
     early_debug_puts("[vmm-early] after vm_init\n");
@@ -1973,6 +2086,11 @@ void *main_continued(void *arg)
         assert(!error);
     }
     early_debug_puts("[vmm-early] after crossvm init\n");
+
+    early_debug_puts("[vmm-early] before virtioso modules\n");
+    error = init_modules(&vm, __start__vmm_module, __stop__vmm_module);
+    ZF_LOGF_IF(error, "Failed to initialise virtioso modules");
+    early_debug_puts("[vmm-early] after virtioso modules\n");
 
     /* Final VMM setup now that everything is defined and loaded */
     ZF_LOGI("Finalising VMM");
