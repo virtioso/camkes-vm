@@ -106,7 +106,7 @@ vm_t vm;
 #define VMM_DEBUG_EXIT_REASON_SLOTS 64
 #define VMM_DEBUG_EPT_PAGE_SLOTS 8
 #ifndef VMM_DEBUG_HEARTBEAT_REPORTS
-#define VMM_DEBUG_HEARTBEAT_REPORTS 1
+#define VMM_DEBUG_HEARTBEAT_REPORTS 0
 #endif
 
 typedef struct vmm_debug_counters {
