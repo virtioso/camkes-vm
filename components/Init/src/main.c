@@ -615,11 +615,13 @@ static void reserve_physical_pci_host_apertures(vm_t *vm)
             ZF_LOGF_IF(!reservation,
                        "Failed to reserve generated physical PCI host bridge region at 0x%lx size 0x%zx",
                        (unsigned long)base, size);
-            err = map_ut_alloc_reservation_with_base_paddr(vm, base, reservation);
-            ZF_LOGF_IF(err,
-                       "Failed to map generated physical PCI host bridge region at 0x%lx size 0x%zx",
-                       (unsigned long)base, size);
-            ZF_LOGI("Reserved generated physical PCI host bridge region 0x%lx size 0x%zx page_bits=%d",
+            /*
+             * Generated host bridge regions describe the Q35 apertures exposed
+             * through ACPI. Do not eagerly map the whole aperture: on x86 these
+             * are large device frames, and IOMMU/EPT setup for actual BARs must
+             * happen through the concrete device mappings instead.
+             */
+            ZF_LOGI("Reserved generated physical PCI host bridge aperture 0x%lx size 0x%zx page_bits=%d",
                     (unsigned long)base, size, page_bits);
         }
         return;
