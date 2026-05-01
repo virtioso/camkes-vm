@@ -59,6 +59,7 @@
     attribute string initrd_image; \
     attribute int iospace_domain; \
     attribute int guest_ram_mb; \
+    attribute int guest_large_pages = false; \
     attribute int cnode_size_bits = 21; \
     attribute vswitch_mapping vswitch_layout[] = []; \
     attribute string vswitch_mac_address = ""; \
