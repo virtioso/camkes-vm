@@ -122,6 +122,57 @@ do { fprintf(stderr, "serial: " fmt , ## __VA_ARGS__); } while (0)
 do {} while (0)
 #endif
 
+static void serial_debug_puts(const char *s)
+{
+    while (*s != '\0') {
+        seL4_DebugPutChar(*s++);
+    }
+}
+
+static void serial_debug_flush_guest_line(const char *line, size_t len, int truncated)
+{
+    serial_debug_puts("[guest-uart vm=");
+    serial_debug_puts(get_instance_name() ? get_instance_name() : "unknown");
+    serial_debug_puts("] ");
+    for (size_t i = 0; i < len; i++) {
+        seL4_DebugPutChar(line[i]);
+    }
+    if (truncated) {
+        serial_debug_puts("...[truncated]");
+    }
+    serial_debug_puts("\n");
+}
+
+static void serial_debug_note_guest_tx(uint8_t ch)
+{
+    static char line[160];
+    static size_t len;
+    static int truncated;
+
+    if (ch == '\r') {
+        return;
+    }
+    if (ch == '\n') {
+        serial_debug_flush_guest_line(line, len, truncated);
+        len = 0;
+        truncated = 0;
+        return;
+    }
+    if (len + 4 >= sizeof(line)) {
+        truncated = 1;
+        return;
+    }
+    if ((ch >= 0x20 && ch <= 0x7e) || ch == '\t') {
+        line[len++] = (char)ch;
+    } else {
+        static const char digits[] = "0123456789abcdef";
+        line[len++] = '\\';
+        line[len++] = 'x';
+        line[len++] = digits[(ch >> 4) & 0xf];
+        line[len++] = digits[ch & 0xf];
+    }
+}
+
 typedef struct SerialFIFO {
     uint8_t data[UART_FIFO_LENGTH];
     uint8_t count;
@@ -444,6 +495,7 @@ static void serial_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             serial_update_parameters(s);
         } else {
             s->thr = (uint8_t) val;
+            serial_debug_note_guest_tx(s->thr);
             if (s->fcr & UART_FCR_FE) {
                 fifo_put(s, XMIT_FIFO, s->thr);
                 s->thr_ipending = 0;
