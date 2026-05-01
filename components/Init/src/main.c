@@ -112,6 +112,44 @@ static void early_debug_puts(const char *s)
     }
 }
 
+static void early_debug_puthex(uintptr_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    bool started = false;
+
+    early_debug_puts("0x");
+    for (int shift = (int)(sizeof(value) * 8) - 4; shift >= 0; shift -= 4) {
+        unsigned int nibble = (value >> shift) & 0xf;
+        if (nibble != 0 || started || shift == 0) {
+            seL4_DebugPutChar(digits[nibble]);
+            started = true;
+        }
+    }
+}
+
+static void early_debug_putuint(uint64_t value)
+{
+    char buf[20];
+    unsigned int pos = 0;
+
+    if (value == 0) {
+        seL4_DebugPutChar('0');
+        return;
+    }
+    while (value != 0 && pos < sizeof(buf)) {
+        buf[pos++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+    while (pos != 0) {
+        seL4_DebugPutChar(buf[--pos]);
+    }
+}
+
+static bool early_debug_trace_count(uint64_t count)
+{
+    return count <= 16 || (count & 0xfff) == 0;
+}
+
 #define VMM_DEBUG_EXIT_REASON_SLOTS 64
 #define VMM_DEBUG_EPT_PAGE_SLOTS 8
 #ifndef VMM_DEBUG_HEARTBEAT_REPORTS
@@ -1118,10 +1156,30 @@ extern seL4_Word serial_getchar_notification_badge(void);
 static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo_t tag, void *cookie)
 {
     if (badge & BIT(27)) {
+        bool trace_badge;
         vmm_debug_counters.async_badge_total++;
+        trace_badge = early_debug_trace_count(vmm_debug_counters.async_badge_total);
+        if (trace_badge) {
+            early_debug_puts("[vmm-async] vm=");
+            early_debug_puts(vmm_debug_vm_label());
+            early_debug_puts(" badge=");
+            early_debug_puthex(badge);
+            early_debug_puts(" total=");
+            early_debug_putuint(vmm_debug_counters.async_badge_total);
+            early_debug_puts("\n");
+        }
         if ((badge & init_timer_notification_badge()) == init_timer_notification_badge()) {
             vmm_debug_counters.init_timer_badge_total++;
             uint32_t completed = init_timer_completed();
+            if (trace_badge || early_debug_trace_count(vmm_debug_counters.init_timer_badge_total)) {
+                early_debug_puts("[vmm-async] vm=");
+                early_debug_puts(vmm_debug_vm_label());
+                early_debug_puts(" timer completed=");
+                early_debug_puthex(completed);
+                early_debug_puts(" timer_total=");
+                early_debug_putuint(vmm_debug_counters.init_timer_badge_total);
+                early_debug_puts("\n");
+            }
             if (completed & BIT(TIMER_PIT)) {
                 pit_timer_interrupt();
             }
@@ -1146,6 +1204,13 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
         }
         if ((badge & serial_getchar_notification_badge()) == serial_getchar_notification_badge()) {
             vmm_debug_counters.serial_getchar_badge_total++;
+            if (trace_badge || early_debug_trace_count(vmm_debug_counters.serial_getchar_badge_total)) {
+                early_debug_puts("[vmm-async] vm=");
+                early_debug_puts(vmm_debug_vm_label());
+                early_debug_puts(" serial_getchar total=");
+                early_debug_putuint(vmm_debug_counters.serial_getchar_badge_total);
+                early_debug_puts("\n");
+            }
             serial_character_interrupt();
         }
         for (size_t i = 0; i < ARRAY_SIZE(irq_badges); i++) {
@@ -1154,6 +1219,15 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
                 if (i < ARRAY_SIZE(vmm_debug_counters.irq_inject_by_line)) {
                     vmm_debug_counters.irq_inject_by_line[i]++;
                 }
+                if (trace_badge || early_debug_trace_count(vmm_debug_counters.irq_inject_total)) {
+                    early_debug_puts("[vmm-async] vm=");
+                    early_debug_puts(vmm_debug_vm_label());
+                    early_debug_puts(" irq_line=");
+                    early_debug_putuint(i);
+                    early_debug_puts(" irq_total=");
+                    early_debug_putuint(vmm_debug_counters.irq_inject_total);
+                    early_debug_puts("\n");
+                }
                 vm_inject_irq(vm->vcpus[BOOT_VCPU], i);
             }
         }
@@ -1161,6 +1235,17 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
             uint32_t device_badge = device_notify_list[i].badge;
             if ((badge & device_badge) == device_badge) {
                 vmm_debug_counters.device_notify_total++;
+                if (trace_badge || early_debug_trace_count(vmm_debug_counters.device_notify_total)) {
+                    early_debug_puts("[vmm-async] vm=");
+                    early_debug_puts(vmm_debug_vm_label());
+                    early_debug_puts(" device_index=");
+                    early_debug_putuint(i);
+                    early_debug_puts(" device_badge=");
+                    early_debug_puthex(device_badge);
+                    early_debug_puts(" device_total=");
+                    early_debug_putuint(vmm_debug_counters.device_notify_total);
+                    early_debug_puts("\n");
+                }
                 ZF_LOGF_IF(device_notify_list[i].func == NULL, "Undefined notify func");
                 device_notify_list[i].func(vm);
             }
