@@ -105,6 +105,9 @@ vm_t vm;
 
 #define VMM_DEBUG_EXIT_REASON_SLOTS 64
 #define VMM_DEBUG_EPT_PAGE_SLOTS 8
+#ifndef VMM_DEBUG_HEARTBEAT_REPORTS
+#define VMM_DEBUG_HEARTBEAT_REPORTS 1
+#endif
 
 typedef struct vmm_debug_counters {
     uint64_t heartbeat_seq;
@@ -254,8 +257,10 @@ void vmm_debug_note_vmrun_return(int ret, int exit_reason)
     vmm_debug_counters.vmrun_return_total++;
     vmm_debug_counters.last_vmrun_ret = ret;
     vmm_debug_counters.last_vmrun_exit_reason = exit_reason;
+#if VMM_DEBUG_HEARTBEAT_REPORTS
     vmm_debug_emitf("\n[vmmdbg] vm=%s vm_run_return ret=%d exit_reason=%d\n",
                     vmm_debug_vm_label(), ret, exit_reason);
+#endif
 }
 
 static void vmm_debug_emit_heartbeat(void)
@@ -1113,7 +1118,9 @@ static int handle_async_event(vm_t *vm, seL4_Word badge, UNUSED seL4_MessageInfo
                 rtc_timer_interrupt(completed);
             }
             if (completed & BIT(TIMER_SECOND_TIMER)) {
+#if VMM_DEBUG_HEARTBEAT_REPORTS
                 vmm_debug_emit_heartbeat();
+#endif
             }
             if (completed & (BIT(TIMER_FIFO_TIMEOUT) | BIT(TIMER_TRANSMIT_TIMER) | BIT(TIMER_MODEM_STATUS_TIMER) | BIT(
                                  TIMER_MORE_CHARS))) {
