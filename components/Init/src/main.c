@@ -103,6 +103,13 @@ static vmm_io_port_list_t *io_ports;
 
 vm_t vm;
 
+static void early_debug_puts(const char *s)
+{
+    while (*s != '\0') {
+        seL4_DebugPutChar(*s++);
+    }
+}
+
 #define VMM_DEBUG_EXIT_REASON_SLOTS 64
 #define VMM_DEBUG_EPT_PAGE_SLOTS 8
 #ifndef VMM_DEBUG_HEARTBEAT_REPORTS
@@ -718,6 +725,7 @@ void pre_init(void)
 {
     int error;
 
+    early_debug_puts("\n[vmm-early] pre_init\n");
     set_putchar(vmm_console_diag_putchar);
 
     /* Camkes adds nothing to our address space, so this array is empty */
@@ -1500,6 +1508,8 @@ void *main_continued(void *arg)
     int have_initrd = 0;
     ps_io_port_ops_t pci_io_ops;
 
+    early_debug_puts("\n[vmm-early] main_continued\n");
+
     rtc_time_date_t time_date = system_rtc_time_date();
     ZF_LOGI("Starting VM %s at: %04d:%02d:%02d %02d:%02d:%02d\n", get_instance_name(), time_date.year, time_date.month,
             time_date.day, time_date.hour, time_date.minute, time_date.second);
@@ -1850,6 +1860,7 @@ void *main_continued(void *arg)
 
 int run(void)
 {
+    early_debug_puts("\n[vmm-early] run\n");
     sel4utils_run_on_stack(&vspace, main_continued, NULL, NULL);
     assert(!"Should not get here");
 
