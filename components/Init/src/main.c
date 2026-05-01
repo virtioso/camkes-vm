@@ -1603,6 +1603,7 @@ void *main_continued(void *arg)
     }
 #endif
 
+    early_debug_puts("[vmm-early] before vcpu setup\n");
     vm_vcpu_t *vm_vcpu;
     vm_vcpu = vm_create_vcpu(&vm, 0);
     assert(vm_vcpu);
@@ -1612,9 +1613,11 @@ void *main_continued(void *arg)
 
     error = vm_register_unhandled_ioport_callback(&vm, ioport_callback_handler, NULL);
     assert(!error);
+    early_debug_puts("[vmm-early] after vcpu setup\n");
 
     /* Initialize the init device badges and notification functions */
     ZF_LOGI("Init device badges and notification functions");
+    early_debug_puts("[vmm-early] before init IRQ setup\n");
     init_con_irq_init();
 
     have_initrd = !(strcmp(initrd_image, "") == 0);
@@ -1625,8 +1628,10 @@ void *main_continued(void *arg)
     ZF_LOGI("IRQ controller init");
     error = vm_create_default_irq_controller(&vm);
     ZF_LOGF_IF(error, "IRQ Controller init failed");
+    early_debug_puts("[vmm-early] after init IRQ setup\n");
 
     ZF_LOGI("serial pre init");
+    early_debug_puts("[vmm-early] before platform preinit\n");
     serial_pre_init();
 
     uint64_t tsc_frequency = init_timer_tsc_frequency();
@@ -1651,8 +1656,10 @@ void *main_continued(void *arg)
     if (error) {
         ZF_LOGF_IF(error, "Failed to initialise VMM ioport management");
     }
+    early_debug_puts("[vmm-early] after platform preinit\n");
 
     /* Do we need to do any early reservations of guest address space? */
+    early_debug_puts("[vmm-early] before reserved memory\n");
     for (i = 0; i < ARRAY_SIZE(guest_ram_regions); i++) {
         error = vm_ram_register_at(&vm, guest_ram_regions[i].base, guest_ram_regions[i].size, false);
         ZF_LOGF_IF(error, "Failed to alloc guest ram at %p", (void *)guest_ram_regions[i].base);
@@ -1686,7 +1693,9 @@ void *main_continued(void *arg)
         ZF_LOGF_IF(!reservation, "Failed to reserve guest physical address range %p - %p\n",
                    (void *)base, (void *)(base + bytes));
     }
+    early_debug_puts("[vmm-early] after reserved memory\n");
 
+    early_debug_puts("[vmm-early] before anonymous memory\n");
     for (int i = 0; i < ARRAY_SIZE(free_anonymous_regions); i++) {
         error = vm_memory_make_anon(&vm, free_anonymous_regions[i].base,
                                     free_anonymous_regions[i].size);
@@ -1694,9 +1703,11 @@ void *main_continued(void *arg)
                    (void *)free_anonymous_regions[i].base,
                    (void *)(free_anonymous_regions[i].base +  free_anonymous_regions[i].size));
     }
+    early_debug_puts("[vmm-early] after anonymous memory\n");
 
     /* Allocate guest ram. This is the main memory that the guest will actually get
      * told exists. Other memory may get allocated and mapped into the guest */
+    early_debug_puts("[vmm-early] before guest ram\n");
     bool paddr_is_vaddr;
     paddr_is_vaddr = false;
     // allocate guest ram in 512MiB chunks. This prevents extreme fragmentation of the
@@ -1712,7 +1723,9 @@ void *main_continued(void *arg)
                    (long)allocate, (long)(MiB_TO_BYTES(guest_ram_mb) - remaining));
         remaining -= allocate;
     }
+    early_debug_puts("[vmm-early] after guest ram\n");
 
+    early_debug_puts("[vmm-early] before pci init\n");
     if (!physical_q35_needs_synthetic_pci_space(&vm)) {
         pci = NULL;
     } else if (physical_q35_pci_uses_structural_host_bridge(&vm)) {
@@ -1773,17 +1786,21 @@ void *main_continued(void *arg)
         error = auto_register_qemu_pci_passthrough(&vm);
         ZF_LOGF_IF(error, "Failed to auto-register qemu pci passthrough devices");
     }
+    early_debug_puts("[vmm-early] after pci init\n");
 
     /* Initialize any extra init devices */
     ZF_LOGI("Init extra devices");
+    early_debug_puts("[vmm-early] before init devices\n");
     for (i = 0; i < init_cons_num_connections(); i++) {
         void (*proc)(vm_t *, vmm_pci_space_t *, vmm_io_port_list_t *) = (void (*)(vm_t *, vmm_pci_space_t *,
                                                                                   vmm_io_port_list_t *))init_cons_init_function(i);
         proc(&vm, pci, io_ports);
     }
+    early_debug_puts("[vmm-early] after init devices\n");
 
     /* Add any IO ports */
     ZF_LOGI("Adding IO ports");
+    early_debug_puts("[vmm-early] before ioports\n");
     for (i = 0; i < ARRAY_SIZE(ioport_handlers); i++) {
         if (ioport_handlers[i].port_in) {
             vm_ioport_range_t config_range = {ioport_handlers[i].start_port, ioport_handlers[i].end_port};
@@ -1820,7 +1837,9 @@ void *main_continued(void *arg)
                                                  };
     error = vm_io_port_add_handler(&vm, pci_config_range, pci_config_interface);
     assert(!error);
+    early_debug_puts("[vmm-early] after ioports\n");
 
+    early_debug_puts("[vmm-early] before kernel load\n");
     uintptr_t kernel_load_addr;
     uintptr_t kernel_region_size;
     error = vm_ram_find_largest_free_region(&vm, &kernel_load_addr, &kernel_region_size);
@@ -1835,8 +1854,10 @@ void *main_continued(void *arg)
     guest_kernel_image.kernel_image_arch.relocs_file = kernel_relocs;
     error =  vm_load_guest_kernel(&vm, kernel_image, kernel_load_addr, BIT(PAGE_BITS_4M), &guest_kernel_image);
     ZF_LOGF_IF(error, "Failed to load guest kernel file");
+    early_debug_puts("[vmm-early] after kernel load\n");
 
     /* Add a boot module */
+    early_debug_puts("[vmm-early] before boot module\n");
     guest_image_t guest_boot_image;
     if (have_initrd) {
         uintptr_t initrd_load_addr;
@@ -1846,12 +1867,17 @@ void *main_continued(void *arg)
         error = vm_load_guest_module(&vm, initrd_image, initrd_load_addr, 0, &guest_boot_image);
         ZF_LOGF_IF(error, "Failed to load boot module");
     }
+    early_debug_puts("[vmm-early] after boot module\n");
+
+    early_debug_puts("[vmm-early] before boot structure\n");
     uintptr_t guest_boot_info_structure_addr;
     error = vmm_plat_init_guest_boot_structure(&vm, kernel_cmdline,
                                                guest_kernel_image, guest_boot_image,
                                                &guest_boot_info_structure_addr);
     ZF_LOGF_IF(error, "Failed to init guest boot structure");
+    early_debug_puts("[vmm-early] after boot structure\n");
 
+    early_debug_puts("[vmm-early] before crossvm init\n");
     if (camkes_cross_vm_connections_init) {
         seL4_CPtr irq_notification = create_async_event_notification_cap(&vm, irq_badges[get_crossvm_irq_num()]);
         ZF_LOGF_IF(irq_notification == seL4_CapNull,
@@ -1859,17 +1885,23 @@ void *main_continued(void *arg)
         error = camkes_cross_vm_connections_init(&vm, pci, irq_notification, CROSS_VM_BASE_ADDRESS);
         assert(!error);
     }
+    early_debug_puts("[vmm-early] after crossvm init\n");
 
     /* Final VMM setup now that everything is defined and loaded */
     ZF_LOGI("Finalising VMM");
+    early_debug_puts("[vmm-early] before finalise\n");
     error = vmm_plat_init_guest_thread_state(vm_vcpu,
                                              guest_kernel_image.kernel_image_arch.entry,
                                              guest_boot_info_structure_addr);
     ZF_LOGF_IF(error, "Failed to finalise VMM");
+    early_debug_puts("[vmm-early] after finalise\n");
 
+    early_debug_puts("[vmm-early] before vcpu_start\n");
     vcpu_start(vm_vcpu);
+    early_debug_puts("[vmm-early] after vcpu_start\n");
 
     /* Now go run the event loop */
+    early_debug_puts("[vmm-early] before vm_run\n");
     vm_run(&vm);
 
     return NULL;
