@@ -1658,7 +1658,9 @@ void *main_continued(void *arg)
     /* Construct a new VM */
     ZF_LOGI("VMM init");
     early_debug_puts("[vmm-early] before vm_init\n");
-    error = vm_init(&vm, &vka, &camkes_simple, vspace, &io_ops, ready_notification_cap, "X86 VM");
+    const char *vm_name = get_instance_name();
+    error = vm_init(&vm, &vka, &camkes_simple, vspace, &io_ops, ready_notification_cap,
+                    vm_name ? vm_name : "unknown");
     ZF_LOGF_IF(error, "VMM init failed");
     early_debug_puts("[vmm-early] after vm_init\n");
 
