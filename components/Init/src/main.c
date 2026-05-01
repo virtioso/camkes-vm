@@ -1916,9 +1916,30 @@ void *main_continued(void *arg)
     // devices or other regions in the lower 4GiB of the guest address space then we will
     // still allocate some RAM in the lower 4GiB, which a guest may require to run correctly.
     size_t remaining = MiB_TO_BYTES(guest_ram_mb);
+    early_debug_puts("[vmm-early] guest ram vm=");
+    early_debug_puts(vm_name ? vm_name : "unknown");
+    early_debug_puts(" total=");
+    early_debug_putuint(remaining);
+    early_debug_puts(" large_pages=");
+    early_debug_putuint(guest_large_pages);
+    early_debug_puts("\n");
     while (remaining > 0) {
         size_t allocate = MIN(remaining, MiB_TO_BYTES(512));
+        early_debug_puts("[vmm-early] guest ram register vm=");
+        early_debug_puts(vm_name ? vm_name : "unknown");
+        early_debug_puts(" allocate=");
+        early_debug_putuint(allocate);
+        early_debug_puts(" remaining_before=");
+        early_debug_putuint(remaining);
+        early_debug_puts("\n");
         uintptr_t res_addr = vm_ram_register(&vm, allocate);
+        early_debug_puts("[vmm-early] guest ram registered vm=");
+        early_debug_puts(vm_name ? vm_name : "unknown");
+        early_debug_puts(" gpa=");
+        early_debug_puthex(res_addr);
+        early_debug_puts(" remaining_after=");
+        early_debug_putuint(remaining - allocate);
+        early_debug_puts("\n");
         ZF_LOGF_IF(!res_addr, "Failed to allocate %lu bytes of guest ram. Already allocated %lu.",
                    (long)allocate, (long)(MiB_TO_BYTES(guest_ram_mb) - remaining));
         remaining -= allocate;
