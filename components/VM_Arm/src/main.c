@@ -70,6 +70,69 @@
 #include <fdtgen.h>
 #include "fdt_manipulation.h"
 
+#define VMM_BATCH_CONSOLE_FLUSH_THRESHOLD 1024
+
+typedef struct vmm_batch_console_buffer {
+    uint32_t stream_id;
+    uint32_t head;
+    uint32_t tail;
+    char buf[4096 - 12];
+} vmm_batch_console_buffer_t;
+
+extern volatile void *batch_get_buf(void) __attribute__((weak));
+extern void batch_batch(void) __attribute__((weak));
+
+static void vmm_batch_console_reset(volatile vmm_batch_console_buffer_t *batch)
+{
+    batch->stream_id = (uint32_t)get_instance_console_stream_id();
+    batch->head = 0;
+    batch->tail = 0;
+}
+
+static void vmm_batch_console_flush(volatile vmm_batch_console_buffer_t *batch)
+{
+    if (batch == NULL || batch->head == batch->tail || batch_batch == NULL) {
+        return;
+    }
+
+    __sync_synchronize();
+    batch_batch();
+    vmm_batch_console_reset(batch);
+}
+
+static void vmm_batch_console_putchar(int c)
+{
+    volatile vmm_batch_console_buffer_t *batch;
+
+    if (batch_get_buf == NULL || batch_batch == NULL) {
+        seL4_DebugPutChar(c);
+        return;
+    }
+
+    batch = (volatile vmm_batch_console_buffer_t *)batch_get_buf();
+    if (batch == NULL) {
+        seL4_DebugPutChar(c);
+        return;
+    }
+
+    if (batch->tail < batch->head ||
+        batch->tail > sizeof(batch->buf) ||
+        (int)batch->stream_id != get_instance_console_stream_id()) {
+        vmm_batch_console_reset(batch);
+    }
+
+    if (batch->tail >= sizeof(batch->buf)) {
+        vmm_batch_console_flush(batch);
+    }
+
+    batch->buf[batch->tail++] = (char)c;
+
+    if (c == '\n' || c == '\r' || c == ':' ||
+        batch->tail >= VMM_BATCH_CONSOLE_FLUSH_THRESHOLD) {
+        vmm_batch_console_flush(batch);
+    }
+}
+
 /* Do - Include prototypes to suppress compiler warnings
  * TODO: Add these to a template header */
 seL4_CPtr notification_ready_notification(void);
@@ -1403,6 +1466,8 @@ extern const int __attribute__((weak)) num_vcpus;
 
 int run(void)
 {
+    set_putchar(vmm_batch_console_putchar);
+
     /* if the base_prio attribute is set, use it */
     if (&base_prio != NULL) {
         VM_PRIO = base_prio;
