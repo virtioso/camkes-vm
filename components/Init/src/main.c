@@ -460,6 +460,9 @@ extern vmm_module_t *__stop__vmm_module[];
 static int init_modules(vm_t *vm, vmm_module_t **start, vmm_module_t **stop)
 {
     for (vmm_module_t **m = start; m < stop; m++) {
+        early_debug_puts("[vmm-early] module loop ");
+        early_debug_puts((*m)->name ? (*m)->name : "(null)");
+        early_debug_puts("\n");
         int err = vmm_module_init(*m, vm);
         if (err) {
             ZF_LOGE("vmm_module_init() failed (%d)", err);
@@ -503,15 +506,24 @@ int vmm_module_init(vmm_module_t *m, void *cookie)
         return 0;
     }
 
+    early_debug_puts("[vmm-early] module deps ");
+    early_debug_puts(m->name ? m->name : "(null)");
+    early_debug_puts("\n");
     int err = init_modules(module_vm, m->deps_start, m->deps_stop);
     if (err) {
         ZF_LOGE("init_modules() failed (%d)", err);
         return -1;
     }
 
+    early_debug_puts("[vmm-early] module init ");
+    early_debug_puts(m->name ? m->name : "(null)");
+    early_debug_puts("\n");
     ZF_LOGI("module name: %s", m->name);
     m->init_module(module_vm, m->cookie);
     m->initialized = true;
+    early_debug_puts("[vmm-early] module done ");
+    early_debug_puts(m->name ? m->name : "(null)");
+    early_debug_puts("\n");
 
     return 0;
 }
@@ -558,8 +570,8 @@ bool vmm_guest_detect_physical_pci_host_bridge(vm_t *vm, vmm_pci_host_bridge_t *
         vmm_pci_host_bridge_init_qemu_pc_q35(
             bridge,
             (vmm_pci_host_bridge_region_t) {
-                .base = 0xb0000000,
-                .size = 0x10000000,
+                .base = 0xa0000000,
+                .size = 0x20000000,
             },
             (vmm_pci_host_bridge_region_t) {
                 .base = 0xc0000000,
@@ -1946,7 +1958,14 @@ void *main_continued(void *arg)
             early_debug_puts(" remaining_after=");
             early_debug_putuint(remaining - allocate);
             early_debug_puts("\n");
-            ZF_LOGF_IF(!is_ram_region(&vm, res_addr, allocate),
+            early_debug_puts("[vmm-early] guest ram validate vm=");
+            early_debug_puts(vm_name ? vm_name : "unknown");
+            early_debug_puts("\n");
+            bool ram_valid = is_ram_region(&vm, res_addr, allocate);
+            early_debug_puts("[vmm-early] guest ram validate result vm=");
+            early_debug_puts(vm_name ? vm_name : "unknown");
+            early_debug_puts(ram_valid ? " ok\n" : " fail\n");
+            ZF_LOGF_IF(!ram_valid,
                        "Failed to allocate %lu bytes of guest ram. Already allocated %lu.",
                        (long)allocate, (long)(MiB_TO_BYTES(guest_ram_mb) - remaining));
             remaining -= allocate;

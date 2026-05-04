@@ -20,6 +20,7 @@ typedef enum IRQConstants {
     /* Minimal IRQ definitions for vm_minimal */
     ORINAGX_HSP_TOP0_DOORBELL = GIC_SPI_INTID_BASE + 176,
     ORINAGX_HSP_AON_SHARED1 = GIC_SPI_INTID_BASE + 133,
+    ORINAGX_UARTA = GIC_SPI_INTID_BASE + 112,
     ORINAGX_UARTI = GIC_SPI_INTID_BASE + 285,
     maxIRQ = GIC_SPI_INTID_BASE + 480
 } platform_interrupt_t;

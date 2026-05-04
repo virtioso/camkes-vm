@@ -59,11 +59,11 @@ int fdt_generate_chosen_node(void *fdt, const char *stdout_path, const char *boo
     }
 
     if (stdout_path && strlen(stdout_path) > 0) {
-        err = fdt_appendprop_string(fdt, this, "stdout-path", stdout_path);
+        err = fdt_setprop_string(fdt, this, "stdout-path", stdout_path);
         if (err) {
             return err;
         }
-        err = fdt_appendprop_string(fdt, this, "linux,stdout-path", stdout_path);
+        err = fdt_setprop_string(fdt, this, "linux,stdout-path", stdout_path);
         if (err) {
             return err;
         }
@@ -93,7 +93,7 @@ int fdt_generate_chosen_node(void *fdt, const char *stdout_path, const char *boo
         return -1;
     }
 
-    err = fdt_appendprop_string(fdt, this, "bootargs", updated_bootargs);
+    err = fdt_setprop_string(fdt, this, "bootargs", updated_bootargs);
     if (err) {
         ZF_LOGE("Failed to generate chosen node: Unable to create updated bootargs");
         free(updated_bootargs);
